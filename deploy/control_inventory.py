@@ -10,13 +10,16 @@ def create_inventory(addresses, username):
     if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_.-]*', username):
         raise ValueError('Invalid SSH username')
     addresses = [str(ipaddress.IPv4Address(value)) for value in addresses]
-    if len(set(addresses)) != 3:
-        raise ValueError('The three nodes require different addresses')
+    if not 2 <= len(addresses) <= 254:
+        raise ValueError('Use one controller and 1–253 Magos for the default /24 pool')
+    if len(set(addresses)) != len(addresses):
+        raise ValueError('All nodes require different addresses')
     return {'all': {'vars': {'ansible_user': username}, 'children': {
         'omnissiah': {'hosts': {'omni01': {'ansible_host': addresses[0], 'omnissiah_vpn_address': '10.77.0.1/24'}}},
         'magos': {'hosts': {
-            'magos01': {'ansible_host': addresses[1], 'omnissiah_vpn_address': '10.77.0.2/32'},
-            'magos02': {'ansible_host': addresses[2], 'omnissiah_vpn_address': '10.77.0.3/32'}}}}}}
+            f'magos{index:02d}': {'ansible_host': address,
+                                 'omnissiah_vpn_address': f'10.77.0.{index + 1}/32'}
+            for index, address in enumerate(addresses[1:], start=1)}}}}}
 
 
 def main():
@@ -26,8 +29,16 @@ def main():
     if args.inventory.exists():
         print(f'Используется существующий inventory: {args.inventory}')
         return
+    while True:
+        try:
+            count = int(input('Количество узлов Magos [2]: ').strip() or '2')
+            if not 1 <= count <= 253:
+                raise ValueError
+            break
+        except ValueError:
+            print('Введите число от 1 до 253 (начальный VPN-пул 10.77.0.0/24).')
     addresses = []
-    for name in ('omni01', 'magos01', 'magos02'):
+    for name in ['omni01'] + [f'magos{index:02d}' for index in range(1, count + 1)]:
         while True:
             value = input(f'IPv4-адрес {name}: ').strip()
             try:

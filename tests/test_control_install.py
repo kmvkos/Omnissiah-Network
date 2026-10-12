@@ -51,32 +51,40 @@ def test_source_symlink_is_rejected(downloaded_folder, tmp_path):
         package(downloaded_folder, tmp_path / 'output')
 
 
-def test_inventory_contains_only_target_nodes():
-    inventory = create_inventory(['192.168.50.10','192.168.50.11','192.168.50.12'], 'henry')
+@pytest.mark.parametrize('count', [1, 3, 5, 10, 253])
+def test_inventory_contains_only_target_nodes(count):
+    addresses = [f'192.168.50.{index}' for index in range(1, count + 2)]
+    inventory = create_inventory(addresses, 'henry')
     assert 'control' not in str(inventory)
     assert inventory['all']['vars']['ansible_user'] == 'henry'
-    assert inventory['all']['children']['magos']['hosts']['magos02']['ansible_host'] == '192.168.50.12'
+    agents = inventory['all']['children']['magos']['hosts']
+    assert len(agents) == count
+    assert agents[f'magos{count:02d}']['ansible_host'] == addresses[-1]
+    assert agents[f'magos{count:02d}']['omnissiah_vpn_address'] == f'10.77.0.{count + 1}/32'
     with pytest.raises(ValueError):
         create_inventory(['192.168.50.10']*3, 'henry')
 
 
-def test_inventory_wizard_preserves_existing_file(tmp_path):
+@pytest.mark.parametrize('count', [2, 3, 5, 10])
+def test_inventory_wizard_preserves_existing_file(tmp_path, count):
     path = tmp_path / 'inventory.yml'
     result = subprocess.run([sys.executable, str(ROOT / 'deploy/control_inventory.py'), '--inventory', str(path)],
-        input='192.168.50.10\n192.168.50.11\n192.168.50.12\nhenry\n',capture_output=True,text=True,timeout=10)
+        input=str(count) + '\n' + '\n'.join(f'192.168.50.{i}' for i in range(10, 11 + count)) + '\nhenry\n',capture_output=True,text=True,timeout=10)
     assert result.returncode == 0, result.stderr
     saved = path.read_bytes()
+    assert len(json.loads(saved)['all']['children']['magos']['hosts']) == count
     result = subprocess.run([sys.executable, str(ROOT / 'deploy/control_inventory.py'), '--inventory', str(path)],
         input='',capture_output=True,text=True,timeout=10)
     assert result.returncode == 0
     assert path.read_bytes() == saved
 
 
+@pytest.mark.parametrize('count', [3, 5, 10])
 @pytest.mark.skipif(not os.getenv('OMNISSIAH_TEST_CONTROL_VENV'), reason='Ansible validation environment is required')
-def test_control_installer_prepare_from_downloaded_folder(downloaded_folder):
+def test_control_installer_prepare_from_downloaded_folder(downloaded_folder, count):
     folder = downloaded_folder
     (folder / '.ansible-venv').symlink_to(os.environ['OMNISSIAH_TEST_CONTROL_VENV'], target_is_directory=True)
-    inventory = create_inventory(['192.168.50.10','192.168.50.11','192.168.50.12'], 'admin')
+    inventory = create_inventory([f'192.168.50.{index}' for index in range(10, 11 + count)], 'admin')
     (folder / 'ansible/inventory.yml').write_text(json.dumps(inventory))
     command = ['bash', str(folder / 'control-install.sh'), '--skip-system-packages', '--prepare-only']
     environment = dict(os.environ, PIP_NO_INDEX='1')
@@ -87,3 +95,25 @@ def test_control_installer_prepare_from_downloaded_folder(downloaded_folder):
         if repeat:
             assert 'changed=0' in result.stdout
     assert not (folder / '.git').exists()
+
+
+@pytest.mark.parametrize('mode', ['--ssh-only', '--skip-system-packages'])
+@pytest.mark.skipif(not os.getenv('OMNISSIAH_TEST_CONTROL_VENV'), reason='Ansible validation environment is required')
+def test_control_installer_stops_before_deployment_on_failed_ssh(downloaded_folder, tmp_path, mode):
+    folder = downloaded_folder
+    (folder / '.ansible-venv').symlink_to(os.environ['OMNISSIAH_TEST_CONTROL_VENV'], target_is_directory=True)
+    (folder / 'ansible/inventory.yml').write_text(json.dumps(
+        create_inventory([f'192.168.50.{i}' for i in range(10, 14)], 'admin')))
+    fake_bin = tmp_path / 'bin'; fake_bin.mkdir()
+    fake_ssh = fake_bin / 'ssh'
+    fake_ssh.write_text("#!/bin/sh\necho 'Permission denied (publickey).' >&2\nexit 255\n")
+    fake_ssh.chmod(0o755)
+    environment = dict(os.environ, PIP_NO_INDEX='1', PATH=str(fake_bin) + ':' + os.environ['PATH'])
+    result = subprocess.run(['bash', str(folder / 'control-install.sh'), mode], cwd=folder,
+                            capture_output=True, text=True, env=environment, timeout=45)
+    assert result.returncode != 0
+    assert result.stderr.count('SSH не готов:') == 4
+    assert 'SSH-проверка не пройдена; развёртывание не запущено' in result.stderr
+    assert 'Install Python before' not in result.stdout
+    if mode == '--ssh-only':
+        assert not (folder / 'ansible/artifacts').exists()
