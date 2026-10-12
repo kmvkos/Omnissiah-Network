@@ -315,7 +315,7 @@ STATUS_CHOICES = {
 
 # Конфигурация приложения
 app.config.update(
-    SQLALCHEMY_DATABASE_URI='sqlite:///vpngate.db',
+    SQLALCHEMY_DATABASE_URI=os.getenv('OMNISSIAH_DATABASE_URI', 'sqlite:///vpngate.db'),
     SQLALCHEMY_TRACK_MODIFICATIONS=False,
     WG_CONFIG_PATH='/etc/wireguard/',
     WG_DEFAULT_DNS='1.1.1.1',
@@ -335,6 +335,10 @@ db.init_app(app)
 # Регистрация API Blueprints
 for blueprint in api_blueprints:
     app.register_blueprint(blueprint)
+
+# The Ansible deployment uses a loopback backend behind a TLS reverse proxy.
+from deployment_auth import install_management_auth
+install_management_auth(app)
 
 
 

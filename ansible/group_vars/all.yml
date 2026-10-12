@@ -1,0 +1,9 @@
+omnissiah_project_dir: /opt/omnissiah-network
+omnissiah_state_dir: /var/lib/omnissiah-network
+omnissiah_service_user: omnissiah
+omnissiah_https_port: 8443
+omnissiah_admin_username: admin
+# Password is generated ONCE on omni01; retrieve it with sudo as documented.
+# Optionally supply omnissiah_initial_admin_password through an encrypted vars file.
+# No installation-time WireGuard, NAT, routing or firewall changes.
+# VPN addresses reserve initial records; Omnissiah owns subsequent configuration.

@@ -74,3 +74,11 @@ omnissiah-nmc-*/
 *.tar.gz
 *.tgz
 general@*
+
+# Local deployment inventory, secrets and source/certificate transfer artifacts
+ansible/inventory.yml
+ansible/inventory.local.yml
+ansible/vars.secret.yml
+ansible/artifacts/
+.ansible-venv/
+!ansible/roles/*/templates/*.conf.j2

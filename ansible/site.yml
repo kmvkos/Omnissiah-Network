@@ -1,0 +1,148 @@
+---
+- name: Validate inventory and prepare committed sources on the administrator workstation
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tags: [prepare]
+  tasks:
+    - name: Require one controller and at least one Magos
+      ansible.builtin.assert:
+        that:
+          - groups.get('omnissiah', []) | length == 1
+          - groups.get('magos', []) | length > 0
+          - groups.omnissiah | intersect(groups.magos) | length == 0
+          - groups.all | difference(groups.omnissiah + groups.magos) | length == 0
+          - not ansible_check_mode
+        fail_msg: Inventory must contain one Omnissiah and one or more Magos, without other hosts.
+    - name: Validate required host parameters
+      ansible.builtin.assert:
+        that:
+          - item is match('^[A-Za-z][A-Za-z0-9_-]{0,14}$')
+          - hostvars[item].ansible_host is defined
+          - hostvars[item].omnissiah_vpn_address is defined
+        fail_msg: Use safe node names (up to 15 characters), IPv4 ansible_host and a VPN address for every host.
+      loop: "{{ groups.omnissiah + groups.magos }}"
+    - name: Read source revision
+      ansible.builtin.command:
+        argv: [git, -C, "{{ playbook_dir }}/..", rev-parse, HEAD]
+      register: revision
+      changed_when: false
+    - name: Reject uncommitted project changes
+      ansible.builtin.command:
+        argv: [git, -C, "{{ playbook_dir }}/..", status, --porcelain, --untracked-files=normal]
+      register: source_status
+      changed_when: false
+      failed_when: source_status.stdout | length > 0
+    - name: Create local artifacts directory
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/artifacts"
+        state: directory
+        mode: '0700'
+    - name: Build the enrollment manifest for validation before accessing VMs
+      ansible.builtin.template:
+        src: roles/controller/templates/manifest.json.j2
+        dest: "{{ playbook_dir }}/artifacts/inventory-manifest.json"
+        mode: '0600'
+    - name: Validate addresses and identity uniqueness locally
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - "{{ playbook_dir }}/../deploy/validate_manifest.py"
+          - "{{ playbook_dir }}/artifacts/inventory-manifest.json"
+      changed_when: false
+    - name: Package tracked files from the selected commit
+      ansible.builtin.command:
+        argv:
+          - git
+          - -C
+          - "{{ playbook_dir }}/.."
+          - archive
+          - --format=tar.gz
+          - "--output={{ playbook_dir }}/artifacts/source-{{ revision.stdout }}.tar.gz"
+          - HEAD
+        creates: "{{ playbook_dir }}/artifacts/source-{{ revision.stdout }}.tar.gz"
+    - name: Share artifact location with deployment plays
+      ansible.builtin.set_fact:
+        source_revision: "{{ revision.stdout }}"
+        source_archive: "{{ playbook_dir }}/artifacts/source-{{ revision.stdout }}.tar.gz"
+
+- name: Bootstrap Python and prepare every Linux node
+  hosts: omnissiah:magos
+  become: true
+  gather_facts: false
+  tags: [deploy]
+  pre_tasks:
+    - name: Install Python before using Python-based modules
+      ansible.builtin.raw: |
+        if test -x /usr/bin/python3; then
+          echo PYTHON_ALREADY_PRESENT
+        else
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update && apt-get install -y python3 && echo PYTHON_INSTALLED
+        fi
+      register: python_bootstrap
+      changed_when: "'PYTHON_INSTALLED' in python_bootstrap.stdout"
+      when: not ansible_check_mode
+    - name: Gather system facts
+      ansible.builtin.setup:
+    - name: Require Debian 13 and normal deployment mode
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.distribution == 'Debian'
+          - ansible_facts.distribution_major_version == '13'
+          - not ansible_check_mode
+        fail_msg: Initial bootstrap supports Debian 13; --check cannot simulate certificate issuance and enrollment.
+  roles:
+    - common
+
+- name: Issue certificates on Omnissiah and enroll inventory nodes
+  hosts: omnissiah
+  become: true
+  gather_facts: false
+  tags: [deploy]
+  roles:
+    - controller
+
+- name: Install node identities and services
+  hosts: omnissiah:magos
+  become: true
+  gather_facts: false
+  tags: [deploy]
+  roles:
+    - services
+
+- name: Verify agents and authenticated management traffic
+  hosts: magos
+  become: true
+  gather_facts: false
+  tags: [deploy]
+  tasks:
+    - name: Send heartbeat with the agent certificate and validate the server certificate
+      ansible.builtin.command:
+        argv:
+          - "{{ omnissiah_project_dir }}/venv/bin/python"
+          - "{{ omnissiah_project_dir }}/deploy/probe.py"
+          - heartbeat
+          - --config
+          - "{{ omnissiah_state_dir }}/bootstrap_config.json"
+      register: heartbeat_probe
+      changed_when: false
+      retries: 10
+      delay: 3
+      until: heartbeat_probe.rc == 0
+    - name: Verify agent HTTPS from the controller using its client identity
+      ansible.builtin.command:
+        argv:
+          - "{{ omnissiah_project_dir }}/venv/bin/python"
+          - "{{ omnissiah_project_dir }}/deploy/probe.py"
+          - agent
+          - --url
+          - "https://{{ ansible_host }}:{{ omnissiah_https_port }}/health"
+          - --pki
+          - "{{ omnissiah_state_dir }}/pki"
+      delegate_to: "{{ groups.omnissiah[0] }}"
+      changed_when: false
+    - name: Report successful enrollment
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: authenticated heartbeat and controller-to-agent HTTPS succeeded. VPN is not yet configured."

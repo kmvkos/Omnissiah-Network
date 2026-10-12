@@ -1,0 +1,26 @@
+[Unit]
+Description=Omnissiah Network {{ 'controller' if inventory_hostname in groups.omnissiah else 'Magos agent' }}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ omnissiah_service_user }}
+Group={{ omnissiah_service_user }}
+WorkingDirectory={{ omnissiah_project_dir }}{{ '/agents' if inventory_hostname in groups.magos else '' }}
+Environment=PYTHONUNBUFFERED=1
+Environment="PYTHONPATH={{ omnissiah_project_dir }}/{{ 'agents' if inventory_hostname in groups.magos else 'src' }}:{{ omnissiah_project_dir }}/src"
+{% if inventory_hostname in groups.omnissiah %}
+EnvironmentFile={{ omnissiah_project_dir }}/.env
+{% else %}
+Environment="OMNISSIAH_AGENT_CONFIG={{ omnissiah_state_dir }}/bootstrap_config.json"
+Environment="OMNISSIAH_AGENT_STATE_DIR={{ omnissiah_state_dir }}/database"
+{% endif %}
+ExecStart={{ omnissiah_project_dir }}/venv/bin/gunicorn --workers 1 --threads 4 --bind 127.0.0.1:{{ 33787 if inventory_hostname in groups.omnissiah else 5001 }} --access-logfile - --error-logfile - {{ 'wsgi:app' if inventory_hostname in groups.omnissiah else 'app.agent:app' }}
+Restart=on-failure
+RestartSec=3
+UMask=0077
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,92 @@
+---
+- name: Install public certificate and CA
+  ansible.builtin.copy:
+    content: "{{ item.content }}"
+    dest: "{{ omnissiah_state_dir }}/pki/{{ item.name }}"
+    owner: root
+    group: "{{ omnissiah_service_user }}"
+    mode: '0644'
+  loop:
+    - name: identity.crt
+      content: "{{ (hostvars[groups.omnissiah[0]].issued_certificates.results | selectattr('item', 'equalto', inventory_hostname) | first).content | b64decode }}"
+    - name: ca.crt
+      content: "{{ hostvars[groups.omnissiah[0]].public_ca.content | b64decode }}"
+  loop_control:
+    label: "{{ item.name }}"
+  notify: Reload nginx
+- name: Prepare installation-owned Magos settings
+  ansible.builtin.template:
+    src: agent-bootstrap.json.j2
+    dest: "{{ omnissiah_state_dir }}/managed-bootstrap.json"
+    owner: root
+    group: "{{ omnissiah_service_user }}"
+    mode: '0600'
+  when: inventory_hostname in groups.magos
+- name: Merge Magos installation settings while preserving runtime VPN state
+  ansible.builtin.command:
+    argv:
+      - "{{ omnissiah_project_dir }}/venv/bin/python"
+      - "{{ omnissiah_project_dir }}/deploy/bootstrap_agent.py"
+      - --desired
+      - "{{ omnissiah_state_dir }}/managed-bootstrap.json"
+      - --config
+      - "{{ omnissiah_state_dir }}/bootstrap_config.json"
+  register: agent_configuration
+  changed_when: (agent_configuration.stdout | from_json).changed
+  when: inventory_hostname in groups.magos
+  notify: Restart application
+- name: Set Magos bootstrap ownership
+  ansible.builtin.file:
+    path: "{{ omnissiah_state_dir }}/bootstrap_config.json"
+    owner: "{{ omnissiah_service_user }}"
+    group: "{{ omnissiah_service_user }}"
+    mode: '0600'
+  when: inventory_hostname in groups.magos
+- name: Install the application service
+  ansible.builtin.template:
+    src: application.service.j2
+    dest: /etc/systemd/system/omnissiah-network.service
+    mode: '0644'
+  notify: Restart application
+- name: Install the HTTPS reverse proxy
+  ansible.builtin.template:
+    src: nginx.conf.j2
+    dest: /etc/nginx/sites-available/omnissiah-network
+    mode: '0644'
+  notify: Reload nginx
+- name: Enable the managed nginx site
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/omnissiah-network
+    dest: /etc/nginx/sites-enabled/omnissiah-network
+    state: link
+  notify: Reload nginx
+- name: Disable the unused default nginx site on dedicated lab VMs
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: Reload nginx
+- name: Check nginx configuration before restarting any application
+  ansible.builtin.command: /usr/sbin/nginx -t
+  changed_when: false
+- name: Restart application after source or dependency changes
+  ansible.builtin.debug:
+    msg: Application files or dependencies changed.
+  changed_when: source_upload.changed or dependencies_install.changed or (enrollment.changed | default(false))
+  notify: Restart application
+- name: Enable and start both services
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    daemon_reload: true
+    enabled: true
+    state: started
+  loop: [omnissiah-network, nginx]
+- name: Apply pending service changes
+  ansible.builtin.meta: flush_handlers
+- name: Verify the loopback application backend
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ 33787 if inventory_hostname in groups.omnissiah else 5001 }}/health"
+    status_code: 200
+  register: backend_health
+  retries: 10
+  delay: 3
+  until: backend_health.status | default(0) == 200

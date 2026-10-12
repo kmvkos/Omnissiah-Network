@@ -1,0 +1,84 @@
+---
+- name: Install system dependencies
+  ansible.builtin.apt:
+    name:
+      - python3
+      - python3-venv
+      - python3-pip
+      - python3-cryptography
+      - openssl
+      - wireguard-tools
+      - iproute2
+      - iptables
+      - sudo
+      - nginx
+      - curl
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+- name: Create a dedicated service group
+  ansible.builtin.group:
+    name: "{{ omnissiah_service_user }}"
+    system: true
+- name: Create a dedicated service account
+  ansible.builtin.user:
+    name: "{{ omnissiah_service_user }}"
+    system: true
+    group: "{{ omnissiah_service_user }}"
+    home: "{{ omnissiah_state_dir }}"
+    create_home: false
+    shell: /usr/sbin/nologin
+- name: Create application and state directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ omnissiah_service_user }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ omnissiah_project_dir }}", owner: root, mode: '0755'}
+    - {path: "{{ omnissiah_state_dir }}", owner: root, mode: '0750'}
+    - {path: "{{ omnissiah_state_dir }}/data", owner: "{{ omnissiah_service_user }}", mode: '0750'}
+    - {path: "{{ omnissiah_state_dir }}/database", owner: "{{ omnissiah_service_user }}", mode: '0750'}
+    - {path: "{{ omnissiah_state_dir }}/pki", owner: root, mode: '0750'}
+- name: Upload the source archive
+  ansible.builtin.copy:
+    src: "{{ hostvars.localhost.source_archive }}"
+    dest: "{{ omnissiah_project_dir }}/.source.tar.gz"
+    owner: root
+    mode: '0600'
+  register: source_upload
+- name: Extract the application when the revision changes
+  ansible.builtin.unarchive:
+    src: "{{ omnissiah_project_dir }}/.source.tar.gz"
+    dest: "{{ omnissiah_project_dir }}"
+    remote_src: true
+    owner: root
+    group: root
+  when: source_upload.changed
+- name: Install dependencies into the node's venv
+  ansible.builtin.pip:
+    requirements: "{{ omnissiah_project_dir }}/{{ 'agents/' if inventory_hostname in groups.magos else '' }}requirements.txt"
+    virtualenv: "{{ omnissiah_project_dir }}/venv"
+    virtualenv_command: /usr/bin/python3 -m venv
+  register: dependencies_install
+- name: Create this node's private key and CSR locally
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - "{{ omnissiah_project_dir }}/deploy/pki.py"
+      - csr
+      - --directory
+      - "{{ omnissiah_state_dir }}/pki"
+      - --name
+      - "{{ inventory_hostname }}"
+      - --address
+      - "{{ ansible_host }}"
+  register: csr_result
+  changed_when: (csr_result.stdout | from_json).changed
+- name: Allow the service account to read its own identity key
+  ansible.builtin.file:
+    path: "{{ omnissiah_state_dir }}/pki/identity.key"
+    owner: root
+    group: "{{ omnissiah_service_user }}"
+    mode: '0640'

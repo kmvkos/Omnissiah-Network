@@ -2,7 +2,7 @@
 Тесты для кастомных исключений
 """
 import pytest
-from nmc_core.nmc_exceptions import (
+from omnissiah_core.nmc_exceptions import (
     NMCError, VPNError, WireGuardError, DatabaseError,
     ConfigurationError, NetworkError, ValidationError,
     SecurityError, SSHError, IPTablesError

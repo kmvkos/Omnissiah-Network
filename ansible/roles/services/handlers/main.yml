@@ -1,0 +1,10 @@
+---
+- name: Restart application
+  ansible.builtin.systemd_service:
+    name: omnissiah-network
+    daemon_reload: true
+    state: restarted
+- name: Reload nginx
+  ansible.builtin.systemd_service:
+    name: nginx
+    state: reloaded
