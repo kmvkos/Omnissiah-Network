@@ -1,5 +1,5 @@
 ---
-- name: Validate inventory and prepare committed sources on the administrator workstation
+- name: Validate inventory and prepare sources on control
   hosts: localhost
   connection: local
   gather_facts: false
@@ -23,17 +23,6 @@
           - hostvars[item].omnissiah_vpn_address is defined
         fail_msg: Use safe node names (up to 15 characters), IPv4 ansible_host and a VPN address for every host.
       loop: "{{ groups.omnissiah + groups.magos }}"
-    - name: Read source revision
-      ansible.builtin.command:
-        argv: [git, -C, "{{ playbook_dir }}/..", rev-parse, HEAD]
-      register: revision
-      changed_when: false
-    - name: Reject uncommitted project changes
-      ansible.builtin.command:
-        argv: [git, -C, "{{ playbook_dir }}/..", status, --porcelain, --untracked-files=normal]
-      register: source_status
-      changed_when: false
-      failed_when: source_status.stdout | length > 0
     - name: Create local artifacts directory
       ansible.builtin.file:
         path: "{{ playbook_dir }}/artifacts"
@@ -51,21 +40,21 @@
           - "{{ playbook_dir }}/../deploy/validate_manifest.py"
           - "{{ playbook_dir }}/artifacts/inventory-manifest.json"
       changed_when: false
-    - name: Package tracked files from the selected commit
+    - name: Package sources from Git or a downloaded project folder
       ansible.builtin.command:
         argv:
-          - git
-          - -C
+          - "{{ ansible_playbook_python }}"
+          - "{{ playbook_dir }}/../deploy/package_source.py"
+          - --source
           - "{{ playbook_dir }}/.."
-          - archive
-          - --format=tar.gz
-          - "--output={{ playbook_dir }}/artifacts/source-{{ revision.stdout }}.tar.gz"
-          - HEAD
-        creates: "{{ playbook_dir }}/artifacts/source-{{ revision.stdout }}.tar.gz"
+          - --output-directory
+          - "{{ playbook_dir }}/artifacts"
+      register: source_package
+      changed_when: (source_package.stdout | from_json).changed
     - name: Share artifact location with deployment plays
       ansible.builtin.set_fact:
-        source_revision: "{{ revision.stdout }}"
-        source_archive: "{{ playbook_dir }}/artifacts/source-{{ revision.stdout }}.tar.gz"
+        source_revision: "{{ (source_package.stdout | from_json).revision }}"
+        source_archive: "{{ (source_package.stdout | from_json).archive }}"
 
 - name: Bootstrap Python and prepare every Linux node
   hosts: omnissiah:magos
