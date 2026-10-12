@@ -1,0 +1,1167 @@
+{% extends 'layout.html' %}
+{% block title %}Политика доступа{% endblock %}
+
+{% block content %}
+<style>
+    .sortable-header {
+        cursor: pointer;
+        user-select: none;
+        transition: color 0.2s;
+    }
+    .sortable-header:hover {
+        color: var(--gold) !important;
+    }
+    .sortable-header i {
+        margin-left: 5px;
+        opacity: 0.7;
+    }
+</style>
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>
+            <i class="bi bi-file-earmark-lock me-2"></i>Политика доступа
+            {% if current_node %}
+                <small class="text-muted">- {{ current_node.role }}: {{ current_node.name }}</small>
+            {% endif %}
+        </h2>
+        {% if current_node %}
+        <div>
+            <a href="{{ url_for('access_policy') }}" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left me-2"></i>Все политики
+            </a>
+        </div>
+        {% endif %}
+        <div>
+            <button type="button" class="btn btn-outline-info me-2" data-bs-toggle="modal" data-bs-target="#viewRulesModal">
+                <i class="bi bi-list-ul me-2"></i>Просмотр правил
+            </button>
+            <button type="button" class="btn btn-outline-warning me-2" data-bs-toggle="modal" data-bs-target="#cleanupModal">
+                <i class="bi bi-broom me-2"></i>Очистить остатки правил
+            </button>
+            <button type="button" class="btn btn-outline-gold me-2" onclick="applyAllPendingRules()">
+                <i class="bi bi-check-circle me-2"></i>Применить все правила
+            </button>
+            <button type="button" class="btn btn-outline-warning me-2" onclick="reapplyAllRules()">
+                <i class="bi bi-arrow-repeat me-2"></i>Переприменить все правила
+            </button>
+            <button type="button" class="btn btn-gold" data-bs-toggle="modal" data-bs-target="#addRuleModal">
+                <i class="bi bi-plus-circle me-2"></i>Добавить правило
+            </button>
+        </div>
+    </div>
+
+    <!-- Показываем правила по узлам, если указан конкретный узел и это Magos -->
+    {% if current_node and current_node.role == 'Magos' and rules_by_node|length > 1 %}
+        {% for node_name, node_rules in rules_by_node.items() %}
+            {% if node_rules %}
+            <div class="premium-card p-3 mb-4">
+                <h5 class="mb-3">
+                    <i class="bi bi-diagram-2 me-2"></i>{{ node_name }}
+                    <span class="badge bg-secondary ms-2">{{ node_rules|length }} правил</span>
+                </h5>
+                <div class="table-responsive">
+                    <table class="table table-dark premium-table">
+                        <thead>
+                            <tr>
+                                <th class="sortable-header" onclick="sortTable('id')">
+                                    ID 
+                                    {% if sort_by == 'id' %}
+                                        <i class="bi bi-arrow-{{ 'down' if sort_order == 'desc' else 'up' }}"></i>
+                                    {% endif %}
+                                </th>
+                                <th class="sortable-header" onclick="sortTable('source')">
+                                    Источник
+                                    {% if sort_by == 'source' %}
+                                        <i class="bi bi-arrow-{{ 'down' if sort_order == 'desc' else 'up' }}"></i>
+                                    {% endif %}
+                                </th>
+                                <th>→</th>
+                                <th class="sortable-header" onclick="sortTable('destination')">
+                                    Назначение
+                                    {% if sort_by == 'destination' %}
+                                        <i class="bi bi-arrow-{{ 'down' if sort_order == 'desc' else 'up' }}"></i>
+                                    {% endif %}
+                                </th>
+                                <th class="sortable-header" onclick="sortTable('protocol')">
+                                    Протокол
+                                    {% if sort_by == 'protocol' %}
+                                        <i class="bi bi-arrow-{{ 'down' if sort_order == 'desc' else 'up' }}"></i>
+                                    {% endif %}
+                                </th>
+                                <th class="sortable-header" onclick="sortTable('ports')">
+                                    Порты/Сервис
+                                    {% if sort_by == 'ports' %}
+                                        <i class="bi bi-arrow-{{ 'down' if sort_order == 'desc' else 'up' }}"></i>
+                                    {% endif %}
+                                </th>
+                                <th>Действие</th>
+                                <th class="sortable-header" onclick="sortTable('status')">
+                                    Статус
+                                    {% if sort_by == 'status' %}
+                                        <i class="bi bi-arrow-{{ 'down' if sort_order == 'desc' else 'up' }}"></i>
+                                    {% endif %}
+                                </th>
+                                <th class="sortable-header" onclick="sortTable('created_at')">
+                                    Создано
+                                    {% if sort_by == 'created_at' %}
+                                        <i class="bi bi-arrow-{{ 'down' if sort_order == 'desc' else 'up' }}"></i>
+                                    {% endif %}
+                                </th>
+                                <th class="sortable-header" onclick="sortTable('priority')">
+                                    Приоритет
+                                    {% if sort_by == 'priority' %}
+                                        <i class="bi bi-arrow-{{ 'down' if sort_order == 'desc' else 'up' }}"></i>
+                                    {% endif %}
+                                </th>
+                                <th class="text-end">Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for rule in node_rules %}
+                            <tr data-rule-id="{{ rule.id }}">
+                                <td><code>#{{ rule.id }}</code></td>
+                                <td><code>{{ rule.get_source_display() }}</code></td>
+                                <td class="text-center"><i class="bi bi-arrow-right text-accent"></i></td>
+                                <td><code>{{ rule.get_destination_display() }}</code></td>
+                                <td><span class="badge bg-secondary">{{ rule.protocol|upper }}</span></td>
+                                <td>
+                                    {% if rule.service %}
+                                        <span class="badge bg-info">{{ rule.service }}</span>
+                                    {% endif %}
+                                    {% if rule.ports %}
+                                        <code>{{ rule.ports }}</code>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if rule.action == 'ACCEPT' %}
+                                        <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Разрешить</span>
+                                    {% elif rule.action == 'DROP' %}
+                                        <span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Запретить</span>
+                                    {% elif rule.action == 'REJECT' %}
+                                        <span class="badge bg-warning"><i class="bi bi-exclamation-circle me-1"></i>Отклонить</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">{{ rule.action or 'ACCEPT' }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if rule.status == 'applied' %}
+                                        <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Применено</span>
+                                    {% elif rule.status == 'pending' %}
+                                        <span class="badge bg-warning"><i class="bi bi-clock me-1"></i>Ожидает</span>
+                                    {% elif rule.status == 'failed' %}
+                                        <span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Ошибка</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">{{ rule.status }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ rule.created_at.strftime('%d.%m.%Y %H:%M') if rule.created_at else '-' }}</td>
+                                <td><span class="badge bg-secondary">{{ rule.priority if rule.priority else 100 }}</span></td>
+                                <td class="text-end">
+                                    {% if rule.is_system_rule %}
+                                        <span class="badge bg-dark text-muted me-1"><i class="bi bi-shield-lock me-1"></i>Системное</span>
+                                        <a href="{{ url_for('view_access_policy_config', rule_id=rule.id) }}" class="btn btn-sm btn-outline-secondary me-1" title="Просмотр конфигурации">
+                                            <i class="bi bi-eye"></i>
+                                        </a>
+                                    {% else %}
+                                        {% if rule.status == 'pending' or rule.status == 'saved' %}
+                                            {% if rule.status == 'pending' %}
+                                            <button type="button" class="btn btn-sm btn-outline-info me-1" onclick="saveRule({{ rule.id }})" title="Сохранить конфигурацию">
+                                                <i class="bi bi-save"></i>
+                                            </button>
+                                            {% endif %}
+                                            {% if rule.status == 'saved' %}
+                                            <button type="button" class="btn btn-sm btn-outline-success me-1" onclick="applyRule({{ rule.id }})" title="Применить">
+                                                <i class="bi bi-play-circle"></i>
+                                            </button>
+                                            {% endif %}
+                                            <a href="{{ url_for('view_access_policy_config', rule_id=rule.id) }}" class="btn btn-sm btn-outline-secondary me-1" title="Просмотр конфигурации">
+                                                <i class="bi bi-eye"></i>
+                                            </a>
+                                        {% elif rule.status == 'applied' %}
+                                            <a href="{{ url_for('view_access_policy_config', rule_id=rule.id) }}" class="btn btn-sm btn-outline-secondary me-1" title="Просмотр конфигурации">
+                                                <i class="bi bi-eye"></i>
+                                            </a>
+                                        {% endif %}
+                                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteRule({{ rule.id }})" title="Удалить">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {% endif %}
+        {% endfor %}
+    {% else %}
+    <!-- Таблица правил -->
+    <div class="premium-card p-3">
+        <div class="table-responsive">
+            <table class="table table-dark premium-table">
+                <thead>
+                    <tr>
+                        <th class="sortable-header" onclick="sortTable('id')">
+                            ID 
+                            {% if sort_by == 'id' %}
+                                <i class="bi bi-arrow-{{ 'down' if sort_order == 'desc' else 'up' }}"></i>
+                            {% endif %}
+                        </th>
+                        <th class="sortable-header" onclick="sortTable('node_name')">
+                            Узел
+                            {% if sort_by == 'node_name' %}
+                                <i class="bi bi-arrow-{{ 'down' if sort_order == 'desc' else 'up' }}"></i>
+                            {% endif %}
+                        </th>
+                        <th class="sortable-header" onclick="sortTable('source')">
+                            Источник
+                            {% if sort_by == 'source' %}
+                                <i class="bi bi-arrow-{{ 'down' if sort_order == 'desc' else 'up' }}"></i>
+                            {% endif %}
+                        </th>
+                        <th>→</th>
+                        <th class="sortable-header" onclick="sortTable('destination')">
+                            Назначение
+                            {% if sort_by == 'destination' %}
+                                <i class="bi bi-arrow-{{ 'down' if sort_order == 'desc' else 'up' }}"></i>
+                            {% endif %}
+                        </th>
+                        <th class="sortable-header" onclick="sortTable('protocol')">
+                            Протокол
+                            {% if sort_by == 'protocol' %}
+                                <i class="bi bi-arrow-{{ 'down' if sort_order == 'desc' else 'up' }}"></i>
+                            {% endif %}
+                        </th>
+                                <th class="sortable-header" onclick="sortTable('ports')">
+                                    Порты/Сервис
+                                    {% if sort_by == 'ports' %}
+                                        <i class="bi bi-arrow-{{ 'down' if sort_order == 'desc' else 'up' }}"></i>
+                                    {% endif %}
+                                </th>
+                                <th>Действие</th>
+                                <th class="sortable-header" onclick="sortTable('status')">
+                                    Статус
+                                    {% if sort_by == 'status' %}
+                                        <i class="bi bi-arrow-{{ 'down' if sort_order == 'desc' else 'up' }}"></i>
+                                    {% endif %}
+                                </th>
+                        <th class="sortable-header" onclick="sortTable('created_at')">
+                            Создано
+                            {% if sort_by == 'created_at' %}
+                                <i class="bi bi-arrow-{{ 'down' if sort_order == 'desc' else 'up' }}"></i>
+                            {% endif %}
+                        </th>
+                        <th class="sortable-header" onclick="sortTable('priority')">
+                            Приоритет
+                            {% if sort_by == 'priority' %}
+                                <i class="bi bi-arrow-{{ 'down' if sort_order == 'desc' else 'up' }}"></i>
+                            {% endif %}
+                        </th>
+                        <th class="text-end">Действия</th>
+                    </tr>
+                </thead>
+                <tbody id="rulesTableBody">
+                    {% if rules %}
+                        {% for rule in rules %}
+                        <tr data-rule-id="{{ rule.id }}">
+                            <td>
+                                <code>#{{ rule.id }}</code>
+                            </td>
+                            <td>
+                                {% set node = None %}
+                                {% if rule.source_type == 'node' and rule.source_id and nodes_dict.get(rule.source_id) %}
+                                    {% set node = nodes_dict[rule.source_id] %}
+                                {% elif rule.destination_type == 'node' and rule.destination_id and nodes_dict.get(rule.destination_id) %}
+                                    {% set node = nodes_dict[rule.destination_id] %}
+                                {% elif rule.source_type == 'protected_object' and rule.source_id %}
+                                    {# Попробуем получить узел через защищенный объект #}
+                                    {% for obj in protected_objects if obj.id == rule.source_id %}
+                                        {% if obj.node_id and nodes_dict.get(obj.node_id) %}
+                                            {% set node = nodes_dict[obj.node_id] %}
+                                        {% endif %}
+                                    {% endfor %}
+                                {% elif rule.destination_type == 'protected_object' and rule.destination_id %}
+                                    {# Попробуем получить узел через защищенный объект #}
+                                    {% for obj in protected_objects if obj.id == rule.destination_id %}
+                                        {% if obj.node_id and nodes_dict.get(obj.node_id) %}
+                                            {% set node = nodes_dict[obj.node_id] %}
+                                        {% endif %}
+                                    {% endfor %}
+                                {% endif %}
+                                {% if node %}
+                                    <span class="badge bg-primary">{{ node.role }}: {{ node.name }}</span>
+                                {% else %}
+                                    <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <code>{{ rule.get_source_display() }}</code>
+                            </td>
+                            <td class="text-center">
+                                <i class="bi bi-arrow-right text-accent"></i>
+                            </td>
+                            <td>
+                                <code>{{ rule.get_destination_display() }}</code>
+                            </td>
+                            <td>
+                                <span class="badge bg-secondary">{{ rule.protocol|upper }}</span>
+                            </td>
+                                <td>
+                                    {% if rule.service %}
+                                        <span class="badge bg-info">{{ rule.service }}</span>
+                                    {% endif %}
+                                    {% if rule.ports %}
+                                        <code>{{ rule.ports }}</code>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if rule.action == 'ACCEPT' %}
+                                        <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Разрешить</span>
+                                    {% elif rule.action == 'DROP' %}
+                                        <span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Запретить</span>
+                                    {% elif rule.action == 'REJECT' %}
+                                        <span class="badge bg-warning"><i class="bi bi-exclamation-circle me-1"></i>Отклонить</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">{{ rule.action or 'ACCEPT' }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if rule.status == 'applied' %}
+                                        <span class="badge bg-success">
+                                            <i class="bi bi-check-circle me-1"></i>Применено
+                                        </span>
+                                    {% elif rule.status == 'pending' %}
+                                        <span class="badge bg-warning">
+                                            <i class="bi bi-clock me-1"></i>Ожидает
+                                        </span>
+                                    {% elif rule.status == 'failed' %}
+                                        <span class="badge bg-danger">
+                                            <i class="bi bi-x-circle me-1"></i>Ошибка
+                                        </span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">{{ rule.status }}</span>
+                                    {% endif %}
+                                </td>
+                            <td>
+                                {{ rule.created_at.strftime('%d.%m.%Y %H:%M') if rule.created_at else '-' }}
+                            </td>
+                            <td>
+                                <span class="badge bg-secondary">{{ rule.priority if rule.priority else 100 }}</span>
+                            </td>
+                            <td class="text-end">
+                                {% if rule.is_system_rule %}
+                                    <span class="badge bg-dark text-muted me-1">
+                                        <i class="bi bi-shield-lock me-1"></i>Системное
+                                    </span>
+                                    <a href="{{ url_for('view_access_policy_config', rule_id=rule.id) }}" 
+                                       class="btn btn-sm btn-outline-secondary me-1" title="Просмотр конфигурации">
+                                        <i class="bi bi-eye"></i>
+                                    </a>
+                                {% else %}
+                                    {% if rule.status == 'pending' or rule.status == 'saved' %}
+                                        {% if rule.status == 'pending' %}
+                                        <button type="button" class="btn btn-sm btn-outline-info me-1" 
+                                                onclick="saveRule({{ rule.id }})" title="Сохранить конфигурацию">
+                                            <i class="bi bi-save"></i>
+                                        </button>
+                                        {% endif %}
+                                        {% if rule.status == 'saved' %}
+                                        <button type="button" class="btn btn-sm btn-outline-success me-1" 
+                                                onclick="applyRule({{ rule.id }})" title="Применить">
+                                            <i class="bi bi-play-circle"></i>
+                                        </button>
+                                        {% endif %}
+                                        <a href="{{ url_for('view_access_policy_config', rule_id=rule.id) }}" 
+                                           class="btn btn-sm btn-outline-secondary me-1" title="Просмотр конфигурации">
+                                            <i class="bi bi-eye"></i>
+                                        </a>
+                                    {% elif rule.status == 'applied' %}
+                                        <a href="{{ url_for('view_access_policy_config', rule_id=rule.id) }}" 
+                                           class="btn btn-sm btn-outline-secondary me-1" title="Просмотр конфигурации">
+                                            <i class="bi bi-eye"></i>
+                                        </a>
+                                    {% endif %}
+                                    <button type="button" class="btn btn-sm btn-outline-danger" 
+                                            onclick="deleteRule({{ rule.id }})" title="Удалить">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="11" class="text-center text-muted">
+                                <i class="bi bi-inbox me-2"></i>Правила доступа не созданы
+                            </td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Модальное окно для добавления правила -->
+<div class="modal fade" id="addRuleModal" tabindex="-1" aria-labelledby="addRuleModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content bg-dark border-secondary">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title" id="addRuleModalLabel">
+                    <i class="bi bi-plus-circle me-2"></i>Добавить правило доступа
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="addRuleForm">
+                    <div class="row">
+                        <!-- Источник -->
+                        <div class="col-md-6 mb-3">
+                            <label for="sourceType" class="form-label">Источник <span class="text-danger">*</span></label>
+                            <select class="form-select" id="sourceType" required onchange="updateSourceOptions()">
+                                <option value="">Выберите тип</option>
+                                <option value="protected_object">Защищенный объект</option>
+                                <option value="node">Узел сети</option>
+                                <option value="network">Сеть/IP</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="sourceSelect" class="form-label">Объект <span class="text-danger">*</span></label>
+                            <select class="form-select" id="sourceSelect" required style="display:none;">
+                                <option value="">Выберите объект</option>
+                            </select>
+                            <input type="text" class="form-control" id="sourceNetwork" 
+                                   placeholder="192.168.1.0/24 или 10.0.0.1" required style="display:none;">
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <!-- Назначение -->
+                        <div class="col-md-6 mb-3">
+                            <label for="destinationType" class="form-label">Назначение <span class="text-danger">*</span></label>
+                            <select class="form-select" id="destinationType" required onchange="updateDestinationOptions()">
+                                <option value="">Выберите тип</option>
+                                <option value="protected_object">Защищенный объект</option>
+                                <option value="node">Узел сети</option>
+                                <option value="network">Сеть/IP</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="destinationSelect" class="form-label">Объект <span class="text-danger">*</span></label>
+                            <select class="form-select" id="destinationSelect" required style="display:none;" onchange="updateDestinationNodeAddresses()">
+                                <option value="">Выберите объект</option>
+                            </select>
+                            <input type="text" class="form-control" id="destinationNetwork" 
+                                   placeholder="192.168.1.0/24 или 10.0.0.1" required style="display:none;">
+                        </div>
+                    </div>
+                    <!-- Поле для выбора IP адреса узла (показывается только для узла сети) -->
+                    <div class="row" id="destinationNodeAddressRow" style="display:none;">
+                        <div class="col-md-6 mb-3">
+                            <label for="destinationNodeAddress" class="form-label">IP адрес узла</label>
+                            <select class="form-select" id="destinationNodeAddress">
+                                <option value="">Выберите IP адрес...</option>
+                            </select>
+                            <div class="form-text">Выберите конкретный IP адрес или "Все адреса" для применения ко всем адресам узла</div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <!-- Протокол и порты -->
+                        <div class="col-md-3 mb-3">
+                            <label for="protocol" class="form-label">Протокол <span class="text-danger">*</span></label>
+                            <select class="form-select" id="protocol" required onchange="updateServiceOptions()">
+                                <option value="tcp">TCP</option>
+                                <option value="udp">UDP</option>
+                                <option value="icmp">ICMP</option>
+                                <option value="any">Any</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label for="action" class="form-label">Действие <span class="text-danger">*</span></label>
+                            <select class="form-select" id="action" required>
+                                <option value="ACCEPT">Разрешить</option>
+                                <option value="DROP">Запретить (DROP)</option>
+                                <option value="REJECT">Отклонить (REJECT)</option>
+                            </select>
+                            <div class="form-text">ACCEPT - разрешить, DROP - тихо отклонить, REJECT - отклонить с ответом</div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label for="service" class="form-label">Сервис</label>
+                            <select class="form-select" id="service" onchange="updatePortsFromService()">
+                                <option value="">Выбрать сервис...</option>
+                                {% for svc in services %}
+                                <option value="{{ svc.name }}" data-protocol="{{ svc.protocol }}" data-ports="{{ svc.ports or '' }}">
+                                    {{ svc.name }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label for="ports" class="form-label">Порты</label>
+                            <input type="text" class="form-control" id="ports" 
+                                   placeholder="22, 80-443, 3389">
+                            <div class="form-text">Например: 22, 80,443, 1000-2000</div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="description" class="form-label">Описание</label>
+                        <textarea class="form-control" id="description" rows="2" 
+                                  placeholder="Описание правила (опционально)"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer border-secondary">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-gold" onclick="submitAddRule()">
+                    <i class="bi bi-check-circle me-2"></i>Добавить правило
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let sourceOptions = {{ source_options|tojson }};
+let destinationOptions = {{ destination_options|tojson }};
+
+// Функция сортировки таблицы
+function sortTable(sortBy) {
+    const urlParams = new URLSearchParams(window.location.search);
+    const currentSort = urlParams.get('sort_by');
+    const currentOrder = urlParams.get('order') || 'asc';
+    
+    // Если кликнули по той же колонке, меняем порядок сортировки
+    let newOrder = 'asc';
+    if (currentSort === sortBy && currentOrder === 'asc') {
+        newOrder = 'desc';
+    }
+    
+    // Обновляем параметры URL
+    urlParams.set('sort_by', sortBy);
+    urlParams.set('order', newOrder);
+    
+    // Перезагружаем страницу с новыми параметрами
+    window.location.search = urlParams.toString();
+}
+
+function updateSourceOptions() {
+    const type = document.getElementById('sourceType').value;
+    const select = document.getElementById('sourceSelect');
+    const network = document.getElementById('sourceNetwork');
+    
+    select.style.display = 'none';
+    network.style.display = 'none';
+    select.required = false;
+    network.required = false;
+    
+    if (type === 'network') {
+        network.style.display = 'block';
+        network.required = true;
+    } else if (type === 'protected_object' || type === 'node') {
+        select.style.display = 'block';
+        select.required = true;
+        select.innerHTML = '<option value="">Выберите объект</option>';
+        
+        const filtered = sourceOptions.filter(opt => opt.type === type);
+        filtered.forEach(opt => {
+            const option = document.createElement('option');
+            option.value = opt.id;
+            option.textContent = opt.display;
+            option.dataset.type = opt.type;
+            select.appendChild(option);
+        });
+    }
+}
+
+function updateDestinationOptions() {
+    const type = document.getElementById('destinationType').value;
+    const select = document.getElementById('destinationSelect');
+    const network = document.getElementById('destinationNetwork');
+    const addressRow = document.getElementById('destinationNodeAddressRow');
+    const addressSelect = document.getElementById('destinationNodeAddress');
+    
+    select.style.display = 'none';
+    network.style.display = 'none';
+    addressRow.style.display = 'none';
+    select.required = false;
+    network.required = false;
+    addressSelect.innerHTML = '<option value="">Выберите IP адрес...</option>';
+    
+    if (type === 'network') {
+        network.style.display = 'block';
+        network.required = true;
+    } else if (type === 'protected_object' || type === 'node') {
+        select.style.display = 'block';
+        select.required = true;
+        select.innerHTML = '<option value="">Выберите объект</option>';
+        
+        const filtered = destinationOptions.filter(opt => opt.type === type);
+        filtered.forEach(opt => {
+            const option = document.createElement('option');
+            option.value = opt.id;
+            option.textContent = opt.display;
+            option.dataset.type = opt.type;
+            select.appendChild(option);
+        });
+        
+        // Если выбран узел, показываем поле для выбора IP адреса
+        if (type === 'node') {
+            addressRow.style.display = 'block';
+        }
+    }
+}
+
+function updateDestinationNodeAddresses() {
+    const select = document.getElementById('destinationSelect');
+    const addressSelect = document.getElementById('destinationNodeAddress');
+    const addressRow = document.getElementById('destinationNodeAddressRow');
+    const destinationType = document.getElementById('destinationType').value;
+    
+    // Показываем поле только если выбран узел сети
+    if (destinationType === 'node' && select.value) {
+        const nodeId = select.value;
+        addressRow.style.display = 'block';
+        addressSelect.innerHTML = '<option value="">Загрузка...</option>';
+        addressSelect.disabled = true;
+        
+        // Загружаем IP адреса узла
+        fetch(`/api/access_policy/node/${nodeId}/addresses`)
+            .then(response => response.json())
+            .then(data => {
+                addressSelect.innerHTML = '<option value="">Выберите IP адрес...</option>';
+                if (data.success && data.addresses) {
+                    data.addresses.forEach(addr => {
+                        const option = document.createElement('option');
+                        option.value = addr.address || '';
+                        option.textContent = addr.display;
+                        option.dataset.type = addr.type;
+                        option.dataset.protected_object_id = addr.protected_object_id || '';
+                        option.title = addr.description || '';
+                        addressSelect.appendChild(option);
+                    });
+                }
+                addressSelect.disabled = false;
+            })
+            .catch(error => {
+                console.error('Error loading node addresses:', error);
+                addressSelect.innerHTML = '<option value="">Ошибка загрузки</option>';
+                addressSelect.disabled = false;
+            });
+    } else {
+        addressRow.style.display = 'none';
+    }
+}
+
+function updateServiceOptions() {
+    const protocol = document.getElementById('protocol').value;
+    const serviceSelect = document.getElementById('service');
+    
+    // Фильтруем сервисы по протоколу
+    Array.from(serviceSelect.options).forEach(opt => {
+        if (opt.value && opt.dataset.protocol !== protocol && opt.dataset.protocol !== 'any') {
+            opt.style.display = 'none';
+        } else {
+            opt.style.display = 'block';
+        }
+    });
+}
+
+function updatePortsFromService() {
+    const serviceSelect = document.getElementById('service');
+    const selected = serviceSelect.options[serviceSelect.selectedIndex];
+    const protocol = document.getElementById('protocol');
+    const ports = document.getElementById('ports');
+    
+    if (selected.value && selected.dataset.protocol) {
+        protocol.value = selected.dataset.protocol;
+        ports.value = selected.dataset.ports || '';
+    }
+}
+
+function submitAddRule() {
+    const form = document.getElementById('addRuleForm');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+    
+    const sourceType = document.getElementById('sourceType').value;
+    const sourceSelect = document.getElementById('sourceSelect');
+    const sourceNetwork = document.getElementById('sourceNetwork').value;
+    const destinationType = document.getElementById('destinationType').value;
+    const destinationSelect = document.getElementById('destinationSelect');
+    const destinationNetwork = document.getElementById('destinationNetwork').value;
+    const destinationNodeAddress = document.getElementById('destinationNodeAddress').value;
+    const destinationNodeAddressSelect = document.getElementById('destinationNodeAddress');
+    const protocol = document.getElementById('protocol').value;
+    const action = document.getElementById('action').value;
+    const ports = document.getElementById('ports').value;
+    const service = document.getElementById('service').value;
+    const description = document.getElementById('description').value;
+    
+    // Определяем destination_id и destination_network в зависимости от выбора
+    let finalDestinationId = null;
+    let finalDestinationNetwork = null;
+    let finalDestinationType = destinationType;
+    
+    if (destinationType === 'network') {
+        finalDestinationNetwork = destinationNetwork;
+    } else if (destinationType === 'node' && destinationSelect.value) {
+        // Если выбран узел и выбран конкретный IP адрес
+        if (destinationNodeAddress) {
+            const selectedOption = destinationNodeAddressSelect.options[destinationNodeAddressSelect.selectedIndex];
+            const addressType = selectedOption.dataset.type;
+            const protectedObjectId = selectedOption.dataset.protected_object_id;
+            
+            if (addressType === 'all') {
+                // Все адреса узла - используем node
+                finalDestinationId = destinationSelect.value;
+                finalDestinationType = 'node';
+            } else if (addressType === 'physical' && protectedObjectId) {
+                // Физический IP - используем защищенный объект
+                finalDestinationId = protectedObjectId;
+                finalDestinationType = 'protected_object';
+            } else if (addressType === 'vpn') {
+                // VPN IP - используем node с destination_network
+                finalDestinationId = destinationSelect.value;
+                finalDestinationType = 'node';
+                finalDestinationNetwork = destinationNodeAddress;
+            }
+        } else {
+            // IP адрес не выбран - используем узел (все адреса)
+            finalDestinationId = destinationSelect.value;
+        }
+    } else if (destinationType === 'protected_object') {
+        finalDestinationId = destinationSelect.value;
+    }
+    
+    const data = {
+        source_type: sourceType,
+        source_id: sourceType === 'network' ? null : (sourceSelect.value || null),
+        source_network: sourceType === 'network' ? sourceNetwork : null,
+        destination_type: finalDestinationType,
+        destination_id: finalDestinationId,
+        destination_network: finalDestinationNetwork,
+        protocol: protocol,
+        action: action,
+        ports: ports || null,
+        service: service || null,
+        description: description || null
+    };
+    
+    fetch('/api/access_policy/rules', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Ошибка при создании правила');
+    });
+}
+
+function saveRule(ruleId) {
+    fetch(`/api/access_policy/rules/${ruleId}/save`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('✅ ' + data.message + '\nЦелевые узлы: ' + data.target_nodes.join(', '));
+            location.reload();
+        } else {
+            alert('❌ Ошибка: ' + data.error);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('❌ Ошибка при сохранении конфигурации');
+    });
+}
+
+function applyRule(ruleId) {
+    if (!confirm('Применить это правило на узлах сети?')) {
+        return;
+    }
+    
+    fetch(`/api/access_policy/rules/${ruleId}/apply`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Ошибка при применении правила');
+    });
+}
+
+function applyAllPendingRules() {
+    if (!confirm('Применить все правила со статусом "Ожидает"?')) {
+        return;
+    }
+    
+    fetch('/api/access_policy/apply_all', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`Применено правил: ${data.applied || 0}`);
+            location.reload();
+        } else {
+            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Ошибка при применении правил');
+    });
+}
+
+function reapplyAllRules() {
+    if (!confirm('Переприменить ВСЕ правила безопасности, включая системные правила?\n\nЭто переприменит все правила на всех узлах сети.')) {
+        return;
+    }
+    
+    // Показываем индикатор загрузки
+    const btn = event.target;
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Переприменение...';
+    
+    fetch('/api/access_policy/reapply_all', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            let message = `✅ ${data.message || 'Правила переприменены'}`;
+            if (data.errors && data.errors.length > 0) {
+                message += `\n\n⚠️ Ошибки (${data.errors.length}):\n${data.errors.slice(0, 5).join('\n')}`;
+                if (data.errors.length > 5) {
+                    message += `\n... и еще ${data.errors.length - 5} ошибок`;
+                }
+            }
+            alert(message);
+            location.reload();
+        } else {
+            alert('❌ Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('❌ Ошибка при переприменении правил: ' + error.message);
+    })
+    .finally(() => {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+    });
+}
+
+function deleteRule(ruleId) {
+    if (!confirm('Удалить это правило?')) {
+        return;
+    }
+    
+    fetch(`/api/access_policy/rules/${ruleId}`, {
+        method: 'DELETE',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Ошибка при удалении правила');
+    });
+}
+
+function cleanupOrphanedRules() {
+    const source = document.getElementById('cleanupSource').value.trim();
+    const destination = document.getElementById('cleanupDestination').value.trim();
+    const protocol = document.getElementById('cleanupProtocol').value.trim();
+    const ports = document.getElementById('cleanupPorts').value.trim();
+    const nodeId = document.getElementById('cleanupNodeId').value.trim();
+    const sshUser = document.getElementById('cleanupSshUser').value.trim() || 'root';
+    const sshPassword = document.getElementById('cleanupSshPassword').value.trim();
+    const sudoPassword = document.getElementById('cleanupSudoPassword').value.trim();
+    
+    if (!source || !destination) {
+        alert('Необходимо указать источник и назначение');
+        return;
+    }
+    
+    const data = {
+        source: source,
+        destination: destination,
+        protocol: protocol || 'tcp',
+        ports: ports || null,
+        node_id: nodeId ? parseInt(nodeId) : null,
+        ssh_user: sshUser,
+        ssh_password: sshPassword || null,
+        sudo_password: sudoPassword || null
+    };
+    
+    // Показываем индикатор загрузки
+    const btn = document.getElementById('cleanupSubmitBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Очистка...';
+    
+    fetch('/api/access_policy/cleanup_orphaned', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`Успешно! Удалено правил: ${data.removed_count || 0}${data.errors && data.errors.length > 0 ? '\n\nПредупреждения:\n' + data.errors.join('\n') : ''}`);
+            // Закрываем модальное окно
+            const modal = bootstrap.Modal.getInstance(document.getElementById('cleanupModal'));
+            modal.hide();
+        } else {
+            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Ошибка при очистке правил: ' + error.message);
+    })
+    .finally(() => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-broom me-2"></i>Очистить';
+    });
+}
+
+function viewIptablesRules() {
+    const nodeId = document.getElementById('viewRulesNodeId').value.trim();
+    const chain = document.getElementById('viewRulesChain').value.trim() || 'FORWARD';
+    const sshIp = document.getElementById('viewRulesSshIp').value.trim();
+    const sshUser = document.getElementById('viewRulesSshUser').value.trim() || 'root';
+    const sshPassword = document.getElementById('viewRulesSshPassword').value.trim();
+    const sudoPassword = document.getElementById('viewRulesSudoPassword').value.trim();
+    
+    if (!nodeId) {
+        alert('Необходимо указать ID узла');
+        return;
+    }
+    
+    let url = `/api/access_policy/rules/list?node_id=${nodeId}&chain=${chain}`;
+    if (sshIp) url += `&ssh_ip=${encodeURIComponent(sshIp)}`;
+    if (sshUser) url += `&ssh_user=${encodeURIComponent(sshUser)}`;
+    if (sshPassword) url += `&ssh_password=${encodeURIComponent(sshPassword)}`;
+    if (sudoPassword) url += `&sudo_password=${encodeURIComponent(sudoPassword)}`;
+    
+    // Показываем индикатор загрузки
+    const btn = document.getElementById('viewRulesBtn');
+    const output = document.getElementById('rulesOutput');
+    btn.disabled = true;
+    output.innerHTML = '<div class="text-center"><span class="spinner-border spinner-border-sm"></span> Загрузка...</div>';
+    
+    fetch(url, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            output.innerHTML = `<pre class="bg-dark p-3 rounded text-light" style="max-height: 400px; overflow-y: auto; font-size: 0.85rem;">${data.rules || 'Правила не найдены'}</pre>`;
+        } else {
+            output.innerHTML = `<div class="alert alert-danger">Ошибка: ${data.error || 'Неизвестная ошибка'}</div>`;
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        output.innerHTML = `<div class="alert alert-danger">Ошибка: ${error.message}</div>`;
+    })
+    .finally(() => {
+        btn.disabled = false;
+    });
+}
+</script>
+
+<!-- Модальное окно для очистки остатков правил -->
+<div class="modal fade" id="cleanupModal" tabindex="-1" aria-labelledby="cleanupModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content bg-dark border-secondary">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title" id="cleanupModalLabel">
+                    <i class="bi bi-broom me-2"></i>Очистка остатков правил
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted mb-3">Укажите параметры правила, которое нужно удалить с узлов:</p>
+                
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label for="cleanupSource" class="form-label">Источник (IP/подсеть) <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="cleanupSource" 
+                               placeholder="192.168.200.0/24" required>
+                    </div>
+                    <div class="col-md-6">
+                        <label for="cleanupDestination" class="form-label">Назначение (IP/подсеть) <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="cleanupDestination" 
+                               placeholder="172.18.16.0/24" required>
+                    </div>
+                </div>
+                
+                <div class="row mb-3">
+                    <div class="col-md-4">
+                        <label for="cleanupProtocol" class="form-label">Протокол</label>
+                        <select class="form-select" id="cleanupProtocol">
+                            <option value="tcp">TCP</option>
+                            <option value="udp">UDP</option>
+                            <option value="icmp">ICMP</option>
+                            <option value="any">Any</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label for="cleanupPorts" class="form-label">Порты</label>
+                        <input type="text" class="form-control" id="cleanupPorts" 
+                               placeholder="22, 80, 443 или 1000-2000">
+                    </div>
+                    <div class="col-md-4">
+                        <label for="cleanupNodeId" class="form-label">ID узла (опционально)</label>
+                        <input type="number" class="form-control" id="cleanupNodeId" 
+                               placeholder="Оставьте пустым для всех узлов">
+                        <small class="form-text text-muted">Если пусто - очистит на всех активных узлах</small>
+                    </div>
+                </div>
+                
+                <hr class="border-secondary">
+                <p class="text-muted mb-2"><small>Для удаленных узлов (Magos/Cognitor) укажите SSH параметры:</small></p>
+                
+                <div class="row mb-3">
+                    <div class="col-md-4">
+                        <label for="cleanupSshUser" class="form-label">SSH пользователь</label>
+                        <input type="text" class="form-control" id="cleanupSshUser" value="root">
+                    </div>
+                    <div class="col-md-4">
+                        <label for="cleanupSshPassword" class="form-label">SSH пароль</label>
+                        <input type="password" class="form-control" id="cleanupSshPassword">
+                    </div>
+                    <div class="col-md-4">
+                        <label for="cleanupSudoPassword" class="form-label">Sudo пароль</label>
+                        <input type="password" class="form-control" id="cleanupSudoPassword">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer border-secondary">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-warning" id="cleanupSubmitBtn" onclick="cleanupOrphanedRules()">
+                    <i class="bi bi-broom me-2"></i>Очистить
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно для просмотра правил iptables -->
+<div class="modal fade" id="viewRulesModal" tabindex="-1" aria-labelledby="viewRulesModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-xl">
+        <div class="modal-content bg-dark border-secondary">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title" id="viewRulesModalLabel">
+                    <i class="bi bi-list-ul me-2"></i>Просмотр iptables правил
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row mb-3">
+                    <div class="col-md-3">
+                        <label for="viewRulesNodeId" class="form-label">ID узла <span class="text-danger">*</span></label>
+                        <input type="number" class="form-control" id="viewRulesNodeId" required>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="viewRulesChain" class="form-label">Цепочка</label>
+                        <select class="form-select" id="viewRulesChain">
+                            <option value="FORWARD">FORWARD</option>
+                            <option value="INPUT">INPUT</option>
+                            <option value="OUTPUT">OUTPUT</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">&nbsp;</label>
+                        <button type="button" class="btn btn-primary w-100" id="viewRulesBtn" onclick="viewIptablesRules()">
+                            <i class="bi bi-eye me-2"></i>Показать правила
+                        </button>
+                    </div>
+                </div>
+                
+                <hr class="border-secondary">
+                <p class="text-muted mb-2"><small>Для удаленных узлов (Magos/Cognitor) укажите SSH параметры:</small></p>
+                
+                <div class="row mb-3">
+                    <div class="col-md-3">
+                        <label for="viewRulesSshIp" class="form-label">SSH IP</label>
+                        <input type="text" class="form-control" id="viewRulesSshIp">
+                    </div>
+                    <div class="col-md-3">
+                        <label for="viewRulesSshUser" class="form-label">SSH пользователь</label>
+                        <input type="text" class="form-control" id="viewRulesSshUser" value="root">
+                    </div>
+                    <div class="col-md-3">
+                        <label for="viewRulesSshPassword" class="form-label">SSH пароль</label>
+                        <input type="password" class="form-control" id="viewRulesSshPassword">
+                    </div>
+                    <div class="col-md-3">
+                        <label for="viewRulesSudoPassword" class="form-label">Sudo пароль</label>
+                        <input type="password" class="form-control" id="viewRulesSudoPassword">
+                    </div>
+                </div>
+                
+                <div id="rulesOutput"></div>
+            </div>
+            <div class="modal-footer border-secondary">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+

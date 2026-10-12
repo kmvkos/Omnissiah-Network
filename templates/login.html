@@ -1,0 +1,40 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="container d-flex justify-content-center align-items-center" style="min-height: 100vh;">
+  <div class="card bg-dark text-light border border-secondary shadow-lg p-4" style="width: 100%; max-width: 420px; border-radius: 0.75rem; backdrop-filter: blur(6px); background-color: rgba(0, 0, 0, 0.65);">
+
+    <div class="text-center mb-4">
+      <i class="bi bi-shield-lock-fill fs-2 text-gold"></i>
+      <h2 class="mt-2 text-gold">Авторизация</h2>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }} alert-dismissible fade show small" role="alert">
+            <i class="bi bi-exclamation-octagon-fill me-2"></i>{{ message }}
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="alert" aria-label="Закрыть"></button>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <form method="POST" class="mt-2" novalidate>
+      <div class="form-floating mb-3">
+        <input type="text" class="form-control bg-dark text-light border-secondary" id="username" name="username" placeholder="Введите логин" autocomplete="username" required>
+        <label for="username"><i class="bi bi-person-fill me-2"></i>Логин</label>
+      </div>
+
+      <div class="form-floating mb-4">
+        <input type="password" class="form-control bg-dark text-light border-secondary" id="password" name="password" placeholder="••••••••" required>
+        <label for="password"><i class="bi bi-key-fill me-2"></i>Пароль</label>
+      </div>
+
+      <button type="submit" class="btn btn-gold btn-lg w-100 d-flex justify-content-center align-items-center gap-2">
+        <i class="bi bi-box-arrow-in-right"></i> Войти
+      </button>
+    </form>
+  </div>
+</div>
+{% endblock %}

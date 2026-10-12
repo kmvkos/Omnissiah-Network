@@ -1,0 +1,464 @@
+{% extends "layout.html" %}
+
+{% block title %}Главная панель{% endblock %}
+{% block header_title %}
+    <i class="bi bi-speedometer2 me-2"></i>Главная панель
+{% endblock %}
+
+{% block styles %}
+<style>
+    .stat-card {
+        background: var(--bg-card);
+        backdrop-filter: blur(20px);
+        border: 1px solid var(--border-color);
+        border-radius: 16px;
+        padding: 1.5rem;
+        transition: var(--transition);
+        position: relative;
+        overflow: hidden;
+    }
+
+    .stat-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: var(--gradient-primary);
+        transform: scaleX(0);
+        transition: var(--transition);
+    }
+
+    .stat-card:hover {
+        transform: translateY(-4px);
+        box-shadow: var(--shadow-xl);
+        border-color: var(--primary);
+    }
+
+    .stat-card:hover::before {
+        transform: scaleX(1);
+    }
+
+    .stat-icon {
+        width: 56px;
+        height: 56px;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.5rem;
+        margin-bottom: 1rem;
+    }
+
+    .stat-icon-primary {
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(139, 92, 246, 0.2) 100%);
+        color: var(--primary-light);
+    }
+
+    .stat-icon-success {
+        background: linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(5, 150, 105, 0.2) 100%);
+        color: var(--accent);
+    }
+
+    .stat-icon-info {
+        background: linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(37, 99, 235, 0.2) 100%);
+        color: #3b82f6;
+    }
+
+    .stat-value {
+        font-size: 2.5rem;
+        font-weight: 700;
+        color: var(--text-primary);
+        margin: 0.5rem 0;
+    }
+
+    .stat-label {
+        font-size: 0.875rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        font-weight: 600;
+    }
+
+    .topology-card {
+        background: var(--bg-card);
+        backdrop-filter: blur(20px);
+        border: 1px solid var(--border-color);
+        border-radius: 20px;
+        padding: 2rem;
+        box-shadow: var(--shadow-lg);
+    }
+
+    .network-node-modern {
+        background: var(--bg-glass);
+        backdrop-filter: blur(10px);
+        border: 1px solid var(--border-color);
+        border-radius: 16px;
+        padding: 1.5rem;
+        min-width: 160px;
+        transition: var(--transition);
+        position: relative;
+        overflow: hidden;
+    }
+
+    .network-node-modern::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: var(--gradient-primary);
+        transform: scaleX(0);
+        transition: var(--transition);
+    }
+
+    .network-node-modern:hover {
+        transform: translateY(-6px);
+        box-shadow: var(--shadow-xl);
+        border-color: var(--primary);
+    }
+
+    .network-node-modern:hover::before {
+        transform: scaleX(1);
+    }
+
+    .node-icon-wrapper {
+        width: 64px;
+        height: 64px;
+        border-radius: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto 1rem;
+        font-size: 2rem;
+    }
+
+    .node-icon-omnissiah {
+        background: var(--gradient-primary);
+        color: white;
+    }
+
+    .node-icon-magos {
+        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+        color: white;
+    }
+
+    .node-icon-cognitor {
+        background: linear-gradient(135deg, #64748b 0%, #475569 100%);
+        color: white;
+    }
+
+    .node-name {
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 0.5rem;
+    }
+
+    .node-ip {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        font-family: 'Courier New', monospace;
+        margin-bottom: 0.75rem;
+    }
+
+    .connection-line {
+        width: 2px;
+        height: 40px;
+        background: linear-gradient(180deg, var(--primary) 0%, transparent 100%);
+        margin: 0.5rem auto;
+        position: relative;
+    }
+
+    .connection-line::after {
+        content: '';
+        position: absolute;
+        bottom: -4px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 8px;
+        height: 8px;
+        background: var(--primary);
+        border-radius: 50%;
+    }
+
+    .traffic-card {
+        background: var(--bg-card);
+        backdrop-filter: blur(20px);
+        border: 1px solid var(--border-color);
+        border-radius: 16px;
+        padding: 2rem;
+        transition: var(--transition);
+        position: relative;
+        overflow: hidden;
+    }
+
+    .traffic-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: var(--gradient-accent);
+    }
+
+    .traffic-card:hover {
+        transform: translateY(-4px);
+        box-shadow: var(--shadow-xl);
+        border-color: var(--accent);
+    }
+
+    .traffic-icon {
+        width: 48px;
+        height: 48px;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.5rem;
+        margin-bottom: 1rem;
+    }
+
+    .traffic-icon-in {
+        background: linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(5, 150, 105, 0.2) 100%);
+        color: var(--accent);
+    }
+
+    .traffic-icon-out {
+        background: linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(37, 99, 235, 0.2) 100%);
+        color: #3b82f6;
+    }
+
+    .traffic-value {
+        font-size: 3rem;
+        font-weight: 700;
+        background: var(--gradient-accent);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        margin: 1rem 0;
+    }
+
+    .section-title {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--text-primary);
+        margin-bottom: 1.5rem;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+
+    .section-title i {
+        color: var(--primary-light);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-0">
+    <!-- Статистические карточки -->
+    <div class="row g-4 mb-4">
+        <div class="col-md-4">
+            <div class="stat-card">
+                <div class="stat-icon stat-icon-primary">
+                    <i class="bi bi-diagram-3"></i>
+                </div>
+                <div class="stat-value">{{ magi|length + cognitors|length + (1 if omnissiah_server else 0) }}</div>
+                <div class="stat-label">Всего узлов</div>
+                <div class="d-flex justify-content-between mt-3 pt-3" style="border-top: 1px solid var(--border-light);">
+                    <div class="text-center flex-fill">
+                        <div class="text-success" style="font-size: 1.5rem; font-weight: 600;">{{ active_nodes }}</div>
+                        <div class="stat-label">Активно</div>
+                    </div>
+                    <div class="text-center flex-fill" style="border-left: 1px solid var(--border-light);">
+                        <div class="text-danger" style="font-size: 1.5rem; font-weight: 600;">{{ inactive_nodes }}</div>
+                        <div class="stat-label">Неактивно</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="stat-card">
+                <div class="stat-icon stat-icon-info">
+                    <i class="bi bi-hdd-network"></i>
+                </div>
+                <div class="stat-value">{{ magi|length }}</div>
+                <div class="stat-label">Magos узлов</div>
+                <div class="mt-3 pt-3" style="border-top: 1px solid var(--border-light);">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span class="stat-label">Ретрансляторы</span>
+                        <span class="badge badge-success-modern">{{ magi|selectattr('vpn_status', 'equalto', 'online')|list|length }} онлайн</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="stat-card">
+                <div class="stat-icon stat-icon-success">
+                    <i class="bi bi-ip"></i>
+                </div>
+                <div class="d-flex justify-content-between align-items-end">
+                    <div>
+                        <div class="stat-value">{{ ip_stats.used_ips if ip_stats else 0 }}</div>
+                        <div class="stat-label">Использовано IP</div>
+                    </div>
+                    <div class="text-end">
+                        <div class="stat-value">{{ ip_stats.free_ips if ip_stats else 0 }}</div>
+                        <div class="stat-label">Свободно IP</div>
+                    </div>
+                </div>
+                {% if ip_stats %}
+                <div class="mt-3 pt-3" style="border-top: 1px solid var(--border-light);">
+                    <div class="progress" style="height: 8px; background: var(--bg-secondary); border-radius: 4px;">
+                        <div class="progress-bar" role="progressbar" 
+                             style="width: {{ (ip_stats.used_ips / ip_stats.total_ips * 100) if ip_stats.total_ips > 0 else 0 }}%; 
+                                    background: var(--gradient-accent);"
+                             aria-valuenow="{{ ip_stats.used_ips }}" 
+                             aria-valuemin="0" 
+                             aria-valuemax="{{ ip_stats.total_ips }}">
+                        </div>
+                    </div>
+                    <small class="text-muted mt-2 d-block">
+                        {{ "%.1f"|format((ip_stats.used_ips / ip_stats.total_ips * 100) if ip_stats.total_ips > 0 else 0) }}% использовано
+                    </small>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Топология сети -->
+    <div class="topology-card mb-4 fade-in">
+        <h2 class="section-title">
+            <i class="bi bi-diagram-3"></i>
+            Топология сети
+        </h2>
+
+        <div class="network-topology text-center">
+            {% if omnissiah_server %}
+                <!-- Прямые Cognitor ВВЕРХУ -->
+                {% set direct_cognitors = cognitors | selectattr("parent_id", "equalto", omnissiah_server.id) | list %}
+                {% if direct_cognitors %}
+                <div class="d-flex justify-content-center gap-4 mb-4 align-items-end flex-wrap">
+                    {% for cognitor in direct_cognitors %}
+                    <div class="d-flex flex-column align-items-center">
+                        <div class="network-node-modern">
+                            <div class="node-icon-wrapper node-icon-cognitor">
+                                <i class="bi bi-pc-display"></i>
+                            </div>
+                            <div class="node-name">{{ cognitor.name }}</div>
+                            <div class="node-ip">{{ cognitor.ip_pool }}</div>
+                            <span class="badge {% if cognitor.status == 'active' %}badge-success-modern{% else %}badge-danger-modern{% endif %}">
+                                {{ STATUS_CHOICES[cognitor.status] if cognitor.status in STATUS_CHOICES else cognitor.status }}
+                            </span>
+                        </div>
+                        <div class="connection-line"></div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+
+                <!-- ГЛАВНЫЙ СЕРВЕР -->
+                <div class="d-flex justify-content-center align-items-center mb-4">
+                    <div class="network-node-modern" style="min-width: 200px;">
+                        <div class="node-icon-wrapper node-icon-omnissiah" style="width: 80px; height: 80px; font-size: 2.5rem;">
+                            <i class="bi bi-server"></i>
+                        </div>
+                        <div class="node-name" style="font-size: 1.25rem;">{{ omnissiah_server.name }}</div>
+                        <div class="node-ip">{{ omnissiah_server.ip_pool }}</div>
+                        <span class="badge {% if omnissiah_server.status == 'active' %}badge-success-modern{% else %}badge-danger-modern{% endif %}">
+                            {{ STATUS_CHOICES[omnissiah_server.status] if omnissiah_server.status in STATUS_CHOICES else omnissiah_server.status }}
+                        </span>
+                    </div>
+                </div>
+
+                <!-- MAGOS И COGNITOR -->
+                {% if magi %}
+                <div class="d-flex flex-wrap justify-content-center gap-5 mt-4">
+                    {% for magos in magi %}
+                    <div class="text-center">
+                        <div class="connection-line"></div>
+                        <div class="network-node-modern mb-3" style="min-width: 200px;">
+                            <div class="node-icon-wrapper node-icon-magos">
+                                <i class="bi bi-hdd-network"></i>
+                            </div>
+                            <div class="node-name">{{ magos.name }}</div>
+                            <div class="node-ip">{{ magos.ip_pool }}</div>
+                            <div class="d-flex flex-column align-items-center gap-2 mt-2">
+                                <span class="badge {% if magos.vpn_status == 'online' %}badge-success-modern{% else %}badge-danger-modern{% endif %}">
+                                    VPN: {{ 'OK' if magos.vpn_status == 'online' else 'Нет' }}
+                                </span>
+                                <span class="badge {% if magos.service_status == 'online' %}badge-success-modern{% else %}badge-danger-modern{% endif %}">
+                                    mTLS: {{ 'OK' if magos.service_status == 'online' else 'Нет' }}
+                                </span>
+                            </div>
+                        </div>
+
+                        {% set magos_cognitors = cognitors | selectattr("parent_id", "equalto", magos.id) | list %}
+                        {% if magos_cognitors %}
+                        <div class="connection-line"></div>
+                        <div class="d-flex justify-content-center gap-3 mt-3 flex-wrap">
+                            {% for cognitor in magos_cognitors %}
+                            <div class="network-node-modern" style="min-width: 160px;">
+                                <div class="node-icon-wrapper node-icon-cognitor">
+                                    <i class="bi bi-pc-display"></i>
+                                </div>
+                                <div class="node-name">{{ cognitor.name }}</div>
+                                <div class="node-ip">{{ cognitor.ip_pool }}</div>
+                                <span class="badge {% if cognitor.status == 'active' %}badge-success-modern{% else %}badge-danger-modern{% endif %}">
+                                    {{ STATUS_CHOICES[cognitor.status] if cognitor.status in STATUS_CHOICES else cognitor.status }}
+                                </span>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            {% else %}
+                <div class="text-center py-5">
+                    <i class="bi bi-inbox" style="font-size: 3rem; color: var(--text-muted);"></i>
+                    <p class="text-muted mt-3">Главный узел не настроен</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Трафик -->
+    <div class="row g-4">
+        <div class="col-md-6">
+            <div class="traffic-card">
+                <div class="traffic-icon traffic-icon-in">
+                    <i class="bi bi-cloud-arrow-down"></i>
+                </div>
+                <h3 class="card-title-modern mb-3">Входящий трафик</h3>
+                <div class="traffic-value">{{ (omnissiah_server.total_receive if omnissiah_server else 0)|bytes_to_mb }}</div>
+                <div class="stat-label">MB</div>
+                <div class="mt-3 pt-3" style="border-top: 1px solid var(--border-light);">
+                    <small class="text-muted">Главный сервер</small>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="traffic-card">
+                <div class="traffic-icon traffic-icon-out">
+                    <i class="bi bi-cloud-arrow-up"></i>
+                </div>
+                <h3 class="card-title-modern mb-3">Исходящий трафик</h3>
+                <div class="traffic-value">{{ (omnissiah_server.total_sent if omnissiah_server else 0)|bytes_to_mb }}</div>
+                <div class="stat-label">MB</div>
+                <div class="mt-3 pt-3" style="border-top: 1px solid var(--border-light);">
+                    <small class="text-muted">Главный сервер</small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

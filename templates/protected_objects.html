@@ -1,0 +1,280 @@
+{% extends 'layout.html' %}
+{% block title %}Защищенные объекты{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-shield-check me-2"></i>Защищенные объекты</h2>
+        <button type="button" class="btn btn-gold" data-bs-toggle="modal" data-bs-target="#addObjectModal">
+            <i class="bi bi-plus-circle me-2"></i>Добавить объект
+        </button>
+    </div>
+
+    <!-- Таблица защищенных объектов -->
+    <div class="premium-card p-3">
+        <div class="table-responsive">
+            <table class="table table-dark premium-table">
+                <thead>
+                    <tr>
+                        <th>Сеть/IP</th>
+                        <th>Узел</th>
+                        <th>Интерфейс</th>
+                        <th>Описание</th>
+                        <th>Создан</th>
+                        <th class="text-end">Действия</th>
+                    </tr>
+                </thead>
+                <tbody id="objectsTableBody">
+                    {% if objects %}
+                        {% for obj in objects %}
+                        <tr data-obj-id="{{ obj.id }}">
+                            <td><code>{{ obj.network }}</code></td>
+                            <td>
+                                <span class="badge bg-accent-soft text-accent">
+                                    {{ obj.node.role }}: {{ obj.node.name }}
+                                </span>
+                            </td>
+                            <td><code>{{ obj.interface }}</code></td>
+                            <td>{{ obj.description or '-' }}</td>
+                            <td>{{ obj.created_at.strftime('%d.%m.%Y %H:%M') if obj.created_at else '-' }}</td>
+                            <td class="text-end">
+                                <button type="button" class="btn btn-sm btn-outline-danger" 
+                                        onclick="deleteObject({{ obj.id }})">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="6" class="text-center text-muted">
+                                <i class="bi bi-inbox me-2"></i>Нет защищенных объектов
+                            </td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно добавления объекта -->
+<div class="modal fade" id="addObjectModal" tabindex="-1" aria-labelledby="addObjectModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content card-modern">
+            <div class="card-header-modern">
+                <h5 class="card-title-modern" id="addObjectModalLabel">
+                    <i class="bi bi-plus-circle me-2"></i>Добавить защищенный объект
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="card-body">
+                <form id="addObjectForm">
+                    <div class="mb-3">
+                        <label for="networkInput" class="form-label text-light">Сеть/IP <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control form-control-modern" id="networkInput" 
+                               placeholder="192.168.200.1/24" required>
+                        <div class="form-text text-muted">Укажите IP адрес или подсеть (CIDR), которая находится за выбранным узлом и интерфейсом</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="nodeSelect" class="form-label text-light">Узел <span class="text-danger">*</span></label>
+                        <select class="form-select form-control-modern form-select-modern" id="nodeSelect" required onchange="updateInterfaces()">
+                            <option value="">Выберите узел</option>
+                            {% for item in nodes_with_interfaces %}
+                            <option value="{{ item.node.id }}" data-interfaces='{{ item.interfaces|tojson }}'>
+                                {{ item.node.role }}: {{ item.node.name }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text text-muted">Выберите узел, за которым находится указанный адрес/подсеть</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="interfaceSelect" class="form-label text-light">Интерфейс <span class="text-danger">*</span></label>
+                        <select class="form-select form-control-modern form-select-modern" id="interfaceSelect" required>
+                            <option value="">Сначала выберите узел</option>
+                        </select>
+                        <div class="form-text text-muted">Выберите интерфейс узла, через который доступен указанный адрес/подсеть</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="descriptionInput" class="form-label text-light">Описание</label>
+                        <textarea class="form-control form-control-modern" id="descriptionInput" rows="3" 
+                                  placeholder="Описание объекта (опционально)"></textarea>
+                    </div>
+                    
+                    <div id="warningAlert" class="alert alert-warning d-none" role="alert">
+                        <i class="bi bi-exclamation-triangle me-2"></i>
+                        <span id="warningText"></span>
+                    </div>
+                </form>
+            </div>
+            <div class="card-header-modern" style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border-light); margin-bottom: 0; padding-bottom: 0; border-bottom: none;">
+                <div></div>
+                <div style="display: flex; gap: 0.75rem;">
+                    <button type="button" class="btn btn-outline-modern" data-bs-dismiss="modal">Отмена</button>
+                    <button type="button" class="btn btn-accent-modern" onclick="submitAddObject()">
+                        <i class="bi bi-check-circle me-2"></i>Добавить
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let interfacesData = {};
+
+// Инициализация данных интерфейсов
+document.addEventListener('DOMContentLoaded', function() {
+    {% for item in nodes_with_interfaces %}
+    interfacesData[{{ item.node.id }}] = {{ item.interfaces|tojson }};
+    {% endfor %}
+});
+
+function updateInterfaces() {
+    const nodeSelect = document.getElementById('nodeSelect');
+    const interfaceSelect = document.getElementById('interfaceSelect');
+    const selectedOption = nodeSelect.options[nodeSelect.selectedIndex];
+    const selectedNodeId = nodeSelect.value;
+    
+    interfaceSelect.innerHTML = '<option value="">Выберите интерфейс</option>';
+    
+    if (selectedNodeId && selectedOption) {
+        try {
+            const interfacesJson = selectedOption.getAttribute('data-interfaces');
+            const interfaces = JSON.parse(interfacesJson);
+            
+            interfaces.forEach(iface => {
+                const option = document.createElement('option');
+                option.value = iface.name;
+                // Отображаем имя интерфейса и IP адрес
+                const displayText = iface.ip ? `${iface.name} (${iface.ip})` : iface.name;
+                option.textContent = displayText;
+                option.dataset.ip = iface.ip || '';
+                interfaceSelect.appendChild(option);
+            });
+        } catch (e) {
+            console.error('Ошибка парсинга интерфейсов:', e);
+            // Fallback на старый формат
+            if (interfacesData[selectedNodeId]) {
+                interfacesData[selectedNodeId].forEach(iface => {
+                    const option = document.createElement('option');
+                    option.value = iface;
+                    option.textContent = iface;
+                    interfaceSelect.appendChild(option);
+                });
+            }
+        }
+    }
+}
+
+function submitAddObject() {
+    const form = document.getElementById('addObjectForm');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+    
+    const network = document.getElementById('networkInput').value.trim();
+    const nodeId = document.getElementById('nodeSelect').value;
+    const interface = document.getElementById('interfaceSelect').value;
+    const description = document.getElementById('descriptionInput').value.trim();
+    
+    // Скрываем предыдущие предупреждения
+    const warningAlert = document.getElementById('warningAlert');
+    warningAlert.classList.add('d-none');
+    
+    fetch('/api/protected_objects', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            network: network,
+            node_id: parseInt(nodeId),
+            interface: interface,
+            description: description
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Показываем предупреждение если есть
+            if (data.warning) {
+                document.getElementById('warningText').textContent = data.warning;
+                warningAlert.classList.remove('d-none');
+                // Не закрываем модальное окно, даем пользователю увидеть предупреждение
+                // но все равно обновляем страницу через 2 секунды
+                setTimeout(() => {
+                    location.reload();
+                }, 2000);
+            } else {
+                // Закрываем модальное окно и обновляем страницу
+                bootstrap.Modal.getInstance(document.getElementById('addObjectModal')).hide();
+                location.reload();
+            }
+            
+            // Показываем сообщение о маршрутах если есть предупреждения
+            if (data.route_warnings && data.route_warnings.length > 0) {
+                alert('Объект создан, но были проблемы с маршрутами:\n' + data.route_warnings.join('\n'));
+            }
+        } else {
+            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Ошибка при создании объекта: ' + error);
+    });
+}
+
+function deleteObject(objId) {
+    if (!confirm('Вы уверены, что хотите удалить этот защищенный объект?')) {
+        return;
+    }
+    
+    fetch(`/api/protected_objects/${objId}`, {
+        method: 'DELETE'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Удаляем строку из таблицы
+            const row = document.querySelector(`tr[data-obj-id="${objId}"]`);
+            if (row) {
+                row.remove();
+            }
+            
+            // Если таблица пуста, показываем сообщение
+            const tbody = document.getElementById('objectsTableBody');
+            if (tbody.children.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="6" class="text-center text-muted">
+                            <i class="bi bi-inbox me-2"></i>Нет защищенных объектов
+                        </td>
+                    </tr>
+                `;
+            }
+        } else {
+            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Ошибка при удалении объекта: ' + error);
+    });
+}
+
+// Очистка формы при закрытии модального окна
+document.getElementById('addObjectModal').addEventListener('hidden.bs.modal', function() {
+    document.getElementById('addObjectForm').reset();
+    document.getElementById('warningAlert').classList.add('d-none');
+    document.getElementById('interfaceSelect').innerHTML = '<option value="">Сначала выберите узел</option>';
+});
+</script>
+
+{% endblock %}
+

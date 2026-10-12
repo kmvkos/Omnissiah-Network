@@ -1,0 +1,70 @@
+{% extends "layout.html" %}
+{% block title %}Изменение конфигурации{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+  <div class="row justify-content-center">
+    <div class="col-lg-8">
+
+      <div class="card server-card p-4">
+        <h4 class="text-gold mb-3 d-flex align-items-center">
+          <i class="bi bi-pencil-square me-2"></i>Изменение конфигурации <span class="ms-2 text-light">{{ config.name }}</span>
+        </h4>
+        <hr class="bg-gold mb-4">
+
+        <form method="POST">
+          {{ form.hidden_tag() }}
+
+          <div class="mb-3">
+            {{ form.name.label(class="form-label text-gold-50") }}
+            {{ form.name(class="form-control bg-dark text-light border-secondary", value=config.name, readonly=True) }}
+          </div>
+
+          <div class="mb-3">
+            {{ form.ip_pool.label(class="form-label text-gold-50") }}
+            {{ form.ip_pool(class="form-control bg-dark text-light border-secondary", value=config.ip_pool, readonly=True) }}
+          </div>
+
+          <div class="mb-3">
+            {{ form.port.label(class="form-label text-gold-50") }}
+            {{ form.port(class="form-control bg-dark text-light border-secondary", value=config.port) }}
+          </div>
+
+          <div class="mb-3">
+            {{ form.dns.label(class="form-label text-gold-50") }}
+            {{ form.dns(class="form-control bg-dark text-light border-secondary", value=config.dns) }}
+          </div>
+
+          <div class="mb-3">
+            {{ form.mtu.label(class="form-label text-gold-50") }}
+            {{ form.mtu(class="form-control bg-dark text-light border-secondary", value=config.mtu) }}
+          </div>
+
+          <div class="mb-3">
+            {{ form.endpoint.label(class="form-label text-gold-50") }}
+            {{ form.endpoint(class="form-control bg-dark text-light border-secondary", value=config.endpoint) }}
+          </div>
+
+          <div class="form-check mb-4">
+            <input type="checkbox" class="form-check-input bg-dark border-secondary" id="use_preshared_key"
+                   name="use_preshared_key" {% if config.preshared_key %}checked{% endif %}>
+            <label class="form-check-label text-gold-50" for="use_preshared_key">
+              Использовать общий ключ
+            </label>
+          </div>
+
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-gold fw-bold">
+              <i class="bi bi-save me-1"></i> Сохранить изменения
+            </button>
+            <a href="{{ url_for('main_node', node_id=config.id) }}" class="btn btn-secondary">
+              <i class="bi bi-x-circle me-1"></i> Отмена
+            </a>
+          </div>
+        </form>
+
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

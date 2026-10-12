@@ -1,0 +1,121 @@
+{% extends "layout.html" %}
+
+{% block title %}Профиль{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+  <div class="row mb-4">
+    <div class="col-12">
+      <h1 class="h3 mb-0 text-white">
+        <i class="bi bi-person-circle me-2"></i>Профиль пользователя
+      </h1>
+    </div>
+  </div>
+
+  <!-- Информация о пользователе -->
+  <div class="row mb-4">
+    <div class="col-md-6">
+      <div class="card server-card h-100">
+        <div class="card-body">
+          <h5 class="card-title d-flex align-items-center">
+            <i class="bi bi-person-vcard me-2"></i>Информация
+          </h5>
+          <hr class="my-2">
+          <p class="mb-1"><strong class="text-gold-50">Логин:</strong> {{ current_user.email }}</p>
+          <p class="mb-1"><strong class="text-gold-50">Роль:</strong> {{ 'Администратор' if current_user.role == 'admin' else 'Пользователь' }}</p>
+          <p class="mb-1"><strong class="text-gold-50">Дата регистрации:</strong> {{ current_user.created_at|format_datetime }}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Смена пароля -->
+    <div class="col-md-6">
+      <div class="card server-card h-100">
+        <div class="card-body">
+          <h5 class="card-title d-flex align-items-center">
+            <i class="bi bi-key me-2"></i>Смена пароля
+          </h5>
+          <hr class="my-2">
+          <form method="POST" action="{{ url_for('change_password') }}">
+            <div class="mb-3">
+              <label for="current_password" class="form-label text-gold-50">Текущий пароль</label>
+              <input type="password" class="form-control bg-dark text-light border-secondary" name="current_password" required>
+            </div>
+            <div class="mb-3">
+              <label for="new_password" class="form-label text-gold-50">Новый пароль</label>
+              <input type="password" class="form-control bg-dark text-light border-secondary" name="new_password" required>
+            </div>
+            <button class="btn btn-outline-warning fw-bold">
+              <i class="bi bi-shield-lock me-1"></i> Сменить пароль
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if current_user.role == 'admin' %}
+  <!-- Добавление пользователя -->
+  <div class="row mb-4">
+    <div class="col-12">
+      <div class="card server-card">
+        <div class="card-body">
+          <h5 class="card-title d-flex align-items-center">
+            <i class="bi bi-person-plus me-2"></i>Создать нового пользователя
+          </h5>
+          <hr class="my-2">
+          <form method="POST" action="{{ url_for('add_user') }}">
+            <div class="row">
+              <div class="col-md-4 mb-3">
+                <input type="text" class="form-control bg-dark text-light border-secondary" name="username" placeholder="Логин" required>
+              </div>
+              <div class="col-md-4 mb-3">
+                <input type="password" class="form-control bg-dark text-light border-secondary" name="password" placeholder="Пароль" required>
+              </div>
+              <div class="col-md-4 mb-3">
+                <select class="form-select bg-dark text-light border-secondary" name="role">
+                  <option value="user">Пользователь</option>
+                  <option value="admin">Администратор</option>
+                </select>
+              </div>
+            </div>
+            <button class="btn btn-gold fw-bold">
+                <i class="bi bi-shield-lock me-1"></i>Добавить
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Опасная зона -->
+  <div class="row">
+    <div class="col-12">
+      <div class="card border border-danger bg-dark text-light server-card">
+        <div class="card-body">
+          <h5 class="card-title d-flex align-items-center text-danger">
+            <i class="bi bi-exclamation-octagon-fill me-2"></i>Удаление аккаунта
+          </h5>
+          <hr class="my-2">
+          {% if current_user.email == 'Adeptus' %}
+          <div class="alert alert-danger">
+            Нельзя удалить системный аккаунт.
+          </div>
+          {% else %}
+          <form method="POST" action="{{ url_for('delete_account') }}">
+            <p>Введите текущий пароль для удаления:</p>
+            <div class="mb-3">
+              <input type="password" class="form-control bg-dark text-light border-secondary" name="password" required>
+            </div>
+            <button class="btn btn-outline-danger fw-bold">
+              <i class="bi bi-trash-fill me-1"></i> Удалить аккаунт
+            </button>
+          </form>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

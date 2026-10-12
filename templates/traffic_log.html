@@ -1,0 +1,386 @@
+{% extends 'layout.html' %}
+{% block title %}Журнал трафика{% endblock %}
+
+{% block content %}
+<style>
+    .sortable-header {
+        cursor: pointer;
+        user-select: none;
+        transition: color 0.2s;
+    }
+    .sortable-header:hover {
+        color: var(--gold) !important;
+    }
+    .sortable-header i {
+        margin-left: 5px;
+        opacity: 0.7;
+    }
+    .filter-card {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        padding: 1.5rem;
+        margin-bottom: 2rem;
+    }
+</style>
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>
+            <i class="bi bi-file-earmark-text me-2"></i>Журнал трафика
+            {% if current_node_id %}
+                {% set node = nodes_dict.get(current_node_id) %}
+                {% if node %}
+                    <small class="text-muted">- {{ node.role }}: {{ node.name }}</small>
+                {% endif %}
+            {% endif %}
+        </h2>
+        <div>
+            {% if current_node_id %}
+            <a href="{{ url_for('traffic_log') }}" class="btn btn-outline-secondary me-2">
+                <i class="bi bi-arrow-left me-2"></i>Все узлы
+            </a>
+            {% endif %}
+            <button type="button" class="btn btn-outline-danger me-2" onclick="confirmClearLogs()">
+                <i class="bi bi-trash me-2"></i>Очистить журнал
+            </button>
+            <button type="button" class="btn btn-outline-info me-2" onclick="exportLogs('csv')">
+                <i class="bi bi-download me-2"></i>Выгрузить CSV
+            </button>
+            <button type="button" class="btn btn-outline-info" onclick="exportLogs('json')">
+                <i class="bi bi-filetype-json me-2"></i>Выгрузить JSON
+            </button>
+        </div>
+    </div>
+
+    <!-- Фильтры -->
+    <div class="filter-card">
+        <form method="GET" action="{{ url_for('traffic_log', node_id=current_node_id) if current_node_id else url_for('traffic_log') }}" id="filterForm">
+            <div class="row g-3">
+                <div class="col-md-2">
+                    <label class="form-label">Узел</label>
+                    <select name="node_id" class="form-select form-select-sm" onchange="document.getElementById('filterForm').submit()">
+                        <option value="">Все узлы</option>
+                        {% for node in all_nodes %}
+                        <option value="{{ node.id }}" {% if current_node_id == node.id %}selected{% endif %}>
+                            {{ node.name }} ({{ node.role }})
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Начальная дата</label>
+                    <input type="date" name="start_date" class="form-control form-control-sm" value="{{ start_date or '' }}">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Конечная дата</label>
+                    <input type="date" name="end_date" class="form-control form-control-sm" value="{{ end_date or '' }}">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">IP источника</label>
+                    <input type="text" name="source_ip" class="form-control form-control-sm" value="{{ source_ip }}" placeholder="10.0.0.1">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">IP назначения</label>
+                    <input type="text" name="destination_ip" class="form-control form-control-sm" value="{{ destination_ip }}" placeholder="10.0.0.2">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Порт источника</label>
+                    <input type="number" name="source_port" class="form-control form-control-sm" value="{{ source_port }}" placeholder="12345" min="1" max="65535">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Порт назначения</label>
+                    <input type="number" name="destination_port" class="form-control form-control-sm" value="{{ destination_port }}" placeholder="80" min="1" max="65535">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Протокол</label>
+                    <select name="protocol" class="form-select form-select-sm">
+                        <option value="">Все</option>
+                        <option value="TCP" {% if protocol == 'TCP' %}selected{% endif %}>TCP</option>
+                        <option value="UDP" {% if protocol == 'UDP' %}selected{% endif %}>UDP</option>
+                        <option value="ICMP" {% if protocol == 'ICMP' %}selected{% endif %}>ICMP</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Действие</label>
+                    <select name="action" class="form-select form-select-sm">
+                        <option value="">Все</option>
+                        <option value="ACCEPT" {% if action == 'ACCEPT' %}selected{% endif %}>ACCEPT</option>
+                        <option value="DROP" {% if action == 'DROP' %}selected{% endif %}>DROP</option>
+                        <option value="REJECT" {% if action == 'REJECT' %}selected{% endif %}>REJECT</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Направление</label>
+                    <select name="direction" class="form-select form-select-sm">
+                        <option value="">Все</option>
+                        <option value="in" {% if direction == 'in' %}selected{% endif %}>Входящий</option>
+                        <option value="out" {% if direction == 'out' %}selected{% endif %}>Исходящий</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">&nbsp;</label>
+                    <button type="submit" class="btn btn-gold btn-sm w-100">
+                        <i class="bi bi-funnel me-2"></i>Применить фильтры
+                    </button>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">&nbsp;</label>
+                    <a href="{{ url_for('traffic_log', node_id=current_node_id) if current_node_id else url_for('traffic_log') }}" class="btn btn-outline-secondary btn-sm w-100">
+                        <i class="bi bi-x-circle me-2"></i>Сбросить
+                    </a>
+                </div>
+            </div>
+            <!-- Сохраняем параметры фильтрации -->
+            <input type="hidden" name="source_port" value="{{ source_port }}">
+            <input type="hidden" name="destination_port" value="{{ destination_port }}">
+            <input type="hidden" name="direction" value="{{ direction }}">
+            <!-- Сохраняем параметры сортировки -->
+            <input type="hidden" name="sort_by" value="{{ sort_by }}">
+            <input type="hidden" name="order" value="{{ order }}">
+        </form>
+    </div>
+
+    <!-- Статистика -->
+    <div class="mb-3">
+        <span class="badge bg-secondary">Всего записей: {{ total_logs }}</span>
+        {% if pagination %}
+        <span class="badge bg-info">Показано: {{ pagination.items|length }} из {{ pagination.total }}</span>
+        {% endif %}
+    </div>
+
+    <!-- Таблица логов -->
+    <div class="table-responsive">
+        <table class="table table-dark premium-table">
+            <thead>
+                <tr>
+                    <th class="sortable-header" onclick="sortTable('timestamp')">
+                        Время
+                        {% if sort_by == 'timestamp' %}
+                            <i class="bi bi-arrow-{{ 'down' if order == 'desc' else 'up' }}"></i>
+                        {% endif %}
+                    </th>
+                    <th class="sortable-header" onclick="sortTable('node_name')">
+                        Узел
+                        {% if sort_by == 'node_name' %}
+                            <i class="bi bi-arrow-{{ 'down' if order == 'desc' else 'up' }}"></i>
+                        {% endif %}
+                    </th>
+                    <th class="sortable-header" onclick="sortTable('source_ip')">
+                        Источник
+                        {% if sort_by == 'source_ip' %}
+                            <i class="bi bi-arrow-{{ 'down' if order == 'desc' else 'up' }}"></i>
+                        {% endif %}
+                    </th>
+                    <th class="sortable-header" onclick="sortTable('destination_ip')">
+                        Назначение
+                        {% if sort_by == 'destination_ip' %}
+                            <i class="bi bi-arrow-{{ 'down' if order == 'desc' else 'up' }}"></i>
+                        {% endif %}
+                    </th>
+                    <th class="sortable-header" onclick="sortTable('protocol')">
+                        Протокол
+                        {% if sort_by == 'protocol' %}
+                            <i class="bi bi-arrow-{{ 'down' if order == 'desc' else 'up' }}"></i>
+                        {% endif %}
+                    </th>
+                    <th>Порты</th>
+                    <th class="sortable-header" onclick="sortTable('action')">
+                        Действие
+                        {% if sort_by == 'action' %}
+                            <i class="bi bi-arrow-{{ 'down' if order == 'desc' else 'up' }}"></i>
+                        {% endif %}
+                    </th>
+                    <th class="sortable-header" onclick="sortTable('bytes_sent')">
+                        Отправлено
+                        {% if sort_by == 'bytes_sent' %}
+                            <i class="bi bi-arrow-{{ 'down' if order == 'desc' else 'up' }}"></i>
+                        {% endif %}
+                    </th>
+                    <th class="sortable-header" onclick="sortTable('bytes_received')">
+                        Получено
+                        {% if sort_by == 'bytes_received' %}
+                            <i class="bi bi-arrow-{{ 'down' if order == 'desc' else 'up' }}"></i>
+                        {% endif %}
+                    </th>
+                    <th>Интерфейс</th>
+                    <th>Направление</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if logs %}
+                    {% for log in logs %}
+                    <tr>
+                        <td>{{ log.timestamp.strftime('%d.%m.%Y %H:%M:%S') if log.timestamp else '-' }}</td>
+                        <td>
+                            {% if log.node %}
+                                <span class="badge bg-secondary">{{ log.node.name }}</span>
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <code>{{ log.source_ip or '-' }}</code>
+                            {% if log.source_port %}
+                                <span class="text-muted">:{{ log.source_port }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <code>{{ log.destination_ip or '-' }}</code>
+                            {% if log.destination_port %}
+                                <span class="text-muted">:{{ log.destination_port }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="badge bg-info">{{ log.protocol or '-' }}</span>
+                        </td>
+                        <td>
+                            {% if log.source_port and log.destination_port %}
+                                <code>{{ log.source_port }}→{{ log.destination_port }}</code>
+                            {% elif log.destination_port %}
+                                <code>→{{ log.destination_port }}</code>
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if log.action == 'ACCEPT' %}
+                                <span class="badge bg-success">{{ log.action }}</span>
+                            {% elif log.action == 'DROP' %}
+                                <span class="badge bg-danger">{{ log.action }}</span>
+                            {% elif log.action == 'REJECT' %}
+                                <span class="badge bg-warning">{{ log.action }}</span>
+                            {% else %}
+                                <span class="badge bg-secondary">{{ log.action or '-' }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if log.bytes_sent %}
+                                {{ (log.bytes_sent / 1024)|round(2) }} KB
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if log.bytes_received %}
+                                {{ (log.bytes_received / 1024)|round(2) }} KB
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <code>{{ log.interface or '-' }}</code>
+                        </td>
+                        <td>
+                            {% if log.direction == 'in' %}
+                                <span class="badge bg-primary">Входящий</span>
+                            {% elif log.direction == 'out' %}
+                                <span class="badge bg-info">Исходящий</span>
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="11" class="text-center text-muted py-4">
+                            <i class="bi bi-inbox me-2"></i>Нет записей трафика
+                        </td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Пагинация -->
+    {% if pagination and pagination.pages > 1 %}
+    <nav aria-label="Навигация по страницам">
+        <ul class="pagination justify-content-center">
+            {% if pagination.has_prev %}
+            <li class="page-item">
+                <a class="page-link" href="{{ url_for('traffic_log', page=pagination.prev_num, node_id=current_node_id, start_date=start_date, end_date=end_date, source_ip=source_ip, destination_ip=destination_ip, source_port=source_port, destination_port=destination_port, protocol=protocol, action=action, direction=direction, sort_by=sort_by, order=order) }}">Предыдущая</a>
+            </li>
+            {% endif %}
+            
+            {% for page_num in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                {% if page_num %}
+                    {% if page_num == pagination.page %}
+                    <li class="page-item active">
+                        <span class="page-link">{{ page_num }}</span>
+                    </li>
+                    {% else %}
+                    <li class="page-item">
+                        <a class="page-link" href="{{ url_for('traffic_log', page=page_num, node_id=current_node_id, start_date=start_date, end_date=end_date, source_ip=source_ip, destination_ip=destination_ip, source_port=source_port, destination_port=destination_port, protocol=protocol, action=action, direction=direction, sort_by=sort_by, order=order) }}">{{ page_num }}</a>
+                    </li>
+                    {% endif %}
+                {% else %}
+                    <li class="page-item disabled">
+                        <span class="page-link">…</span>
+                    </li>
+                {% endif %}
+            {% endfor %}
+            
+            {% if pagination.has_next %}
+            <li class="page-item">
+                <a class="page-link" href="{{ url_for('traffic_log', page=pagination.next_num, node_id=current_node_id, start_date=start_date, end_date=end_date, source_ip=source_ip, destination_ip=destination_ip, source_port=source_port, destination_port=destination_port, protocol=protocol, action=action, direction=direction, sort_by=sort_by, order=order) }}">Следующая</a>
+            </li>
+            {% endif %}
+        </ul>
+    </nav>
+    {% endif %}
+</div>
+
+<script>
+function sortTable(column) {
+    const urlParams = new URLSearchParams(window.location.search);
+    const currentSort = urlParams.get('sort_by');
+    const currentOrder = urlParams.get('order') || 'desc';
+    
+    if (currentSort === column) {
+        urlParams.set('order', currentOrder === 'desc' ? 'asc' : 'desc');
+    } else {
+        urlParams.set('sort_by', column);
+        urlParams.set('order', 'desc');
+    }
+    
+    window.location.search = urlParams.toString();
+}
+
+function confirmClearLogs() {
+    const nodeId = {{ current_node_id or 'null' }};
+    const nodeName = nodeId ? '{{ nodes_dict.get(current_node_id).name if current_node_id and nodes_dict.get(current_node_id) else "" }}' : 'всех узлов';
+    
+    if (confirm(`Вы уверены, что хотите очистить журнал трафика для ${nodeName}?`)) {
+        const url = nodeId ? `/api/traffic_log/clear?node_id=${nodeId}` : '/api/traffic_log/clear';
+        fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('Журнал трафика успешно очищен');
+                window.location.reload();
+            } else {
+                alert('Ошибка при очистке журнала: ' + (data.error || 'Неизвестная ошибка'));
+            }
+        })
+        .catch(error => {
+            alert('Ошибка при очистке журнала: ' + error);
+        });
+    }
+}
+
+function exportLogs(format) {
+    const urlParams = new URLSearchParams(window.location.search);
+    urlParams.set('format', format);
+    urlParams.set('export', '1');
+    
+    const url = '{{ url_for("traffic_log", node_id=current_node_id) if current_node_id else url_for("traffic_log") }}?' + urlParams.toString();
+    window.location.href = url;
+}
+</script>
+{% endblock %}
+
