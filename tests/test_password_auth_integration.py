@@ -21,7 +21,7 @@ pytestmark = pytest.mark.skipif(not os.getenv('OMNISSIAH_TEST_SSHPASS') or not o
 
 
 @pytest.fixture
-def password_server(tmp_path):
+def password_server(tmp_path, request):
     key = paramiko.RSAKey.generate(2048)
     stop = threading.Event()
     listener = socket.socket(); listener.bind(('127.0.0.1', 0)); listener.listen(); listener.settimeout(0.1)
@@ -61,6 +61,8 @@ def password_server(tmp_path):
                     prompt = re.search(rb'\[sudo via ansible, key=[a-z]+\] password:', command)
                     success = re.search(rb'BECOME-SUCCESS-[a-z]+', command)
                     assert prompt and success, command
+                    if getattr(request.node, 'callspec', None) and request.node.callspec.params.get('case') == 'slow-sudo':
+                        time.sleep(14)
                     channel.send(prompt.group() + b' ')
                     password = b''; channel.settimeout(5)
                     while b'\n' not in password:
@@ -91,7 +93,7 @@ def password_server(tmp_path):
         assert not thread.is_alive()
 
 
-@pytest.mark.parametrize('case', ['success', 'wrong-ssh', 'wrong-sudo', 'ssh-only'])
+@pytest.mark.parametrize('case', ['success', 'wrong-ssh', 'wrong-sudo', 'ssh-only', 'slow-sudo'])
 def test_saved_password_installer_checks_real_login_and_sudo(tmp_path, password_server, monkeypatch, case):
     port, known, received = password_server
     folder = tmp_path / 'download'; folder.mkdir()
@@ -114,13 +116,13 @@ def test_saved_password_installer_checks_real_login_and_sudo(tmp_path, password_
               'wrong-ssh-secret' if case == 'wrong-ssh' else 'ssh-test-secret',
               'wrong-sudo-secret' if case == 'wrong-sudo' else 'sudo-test-secret')
     result = subprocess.run(['bash', str(folder / 'control-install.sh'), '--ssh-only' if case == 'ssh-only' else '--access-only'],
-                            cwd=folder, env=environment, input='test-unlock\n', capture_output=True, text=True, timeout=45)
+                            cwd=folder, env=environment, input='test-unlock\n', capture_output=True, text=True, timeout=90)
     output = result.stdout + result.stderr
     assert all(secret not in output for secret in ('ssh-test-secret', 'sudo-test-secret', 'test-unlock'))
-    if case in ('success', 'ssh-only'):
+    if case in ('success', 'ssh-only', 'slow-sudo'):
         assert result.returncode == 0, output
         assert ('ssh', 'ssh-test-secret') in received
-        if case == 'success':
+        if case in ('success', 'slow-sudo'):
             assert ('sudo', 'sudo-test-secret') in received
         else:
             assert not any(kind == 'sudo' for kind, _ in received)

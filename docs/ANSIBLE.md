@@ -6,7 +6,7 @@ Playbook не создаёт туннели и не меняет маршрут�
 Адреса VPN в inventory резервируют записи для дальнейшей настройки в Omnissiah.
 Управляющий обмен при установке идёт через локальную сеть, независимо от VPN.
 
-Для отдельной ВМ control и запуска из скачанного ZIP используйте
+Для отдельной ВМ control и установки через Git используйте
 [CONTROL.md](CONTROL.md). Он поддерживает SSH/sudo-пароли через Vault и вход
 по SSH-ключу. Команды ниже описывают также путь из Git-клона с SSH-ключом.
 
@@ -30,7 +30,7 @@ SSH и возможность получить права root должны су
 ```bash
 sudo apt-get update
 sudo apt-get install git python3 python3-venv openssh-client
-git clone --branch feat/ansible-bootstrap https://github.com/kmvkos/Omnissiah-Network.git
+git clone https://github.com/kmvkos/Omnissiah-Network.git
 cd Omnissiah-Network
 python3 -m venv .ansible-venv
 source .ansible-venv/bin/activate
@@ -38,7 +38,7 @@ python -m pip install -r ansible/requirements-control.txt
 cp ansible/inventory.example.yml ansible/inventory.yml
 ```
 
-Репозиторий приватный: используйте свой обычный GitHub SSH- или HTTPS-доступ.
+Если репозиторий приватный, используйте настроенный GitHub SSH-доступ или token.
 Для Git-клона изменения проекта должны быть закоммичены. Из распакованной
 папки playbook собирает пакет без Git. Локальные inventory, секреты и artifacts
 исключаются из пакета узлов и из Git.

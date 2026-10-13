@@ -17,6 +17,33 @@
           exit 1
         fi
       changed_when: false
+    - name: Diagnose login identity and local hostname resolution without sudo
+      vars:
+        ansible_become: false
+      ansible.builtin.raw: |
+        printf 'SSH_USER=%s\n' "$(id -un)"
+        printf 'SSH_GROUPS=%s\n' "$(id -Gn)"
+        node_hostname=$(hostname 2>/dev/null || true)
+        printf 'HOSTNAME=%s\n' "$node_hostname"
+        if test -n "$node_hostname" && command -v timeout >/dev/null 2>&1 && command -v getent >/dev/null 2>&1; then
+          if timeout 5 getent hosts "$node_hostname" >/dev/null 2>&1; then
+            echo HOSTNAME_RESOLUTION_OK
+          else
+            echo HOSTNAME_RESOLUTION_SLOW_OR_MISSING
+            echo 'Check /etc/hosts: missing local hostname mapping can delay sudo.'
+          fi
+        fi
+        if command -v timeout >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
+          echo SUDO_NONINTERACTIVE_PROBE
+          timeout 8 sudo -n true 2>&1
+          printf 'SUDO_NONINTERACTIVE_RC=%s\n' "$?"
+        fi
+        true
+      register: access_diagnostics
+      changed_when: false
+    - name: Show non-secret access diagnostics for each node
+      ansible.builtin.debug:
+        msg: "{{ access_diagnostics.stdout_lines }}"
     - name: Verify privilege escalation returns root on every target
       become: true
       ansible.builtin.raw: |

@@ -66,6 +66,19 @@
   any_errors_fatal: true
   tags: [deploy]
   pre_tasks:
+    - name: Add a local hostname mapping when hostname lookup is missing or slow
+      ansible.builtin.raw: |
+        node_hostname=$(hostname)
+        if awk -v name="$node_hostname" '{for(i=2;i<=NF;i++) {if($i ~ /^#/) break; if($i==name) found=1}} END{exit(!found)}' /etc/hosts; then
+          echo HOSTNAME_ALREADY_RESOLVES
+        elif timeout 5 getent hosts "$node_hostname" >/dev/null 2>&1; then
+          echo HOSTNAME_ALREADY_RESOLVES
+        else
+          printf '127.0.1.1 %s\n' "$node_hostname" >> /etc/hosts
+          echo LOCAL_HOSTNAME_MAPPING_ADDED
+        fi
+      register: hostname_bootstrap
+      changed_when: "'LOCAL_HOSTNAME_MAPPING_ADDED' in hostname_bootstrap.stdout"
     - name: Install Python before using Python-based modules
       ansible.builtin.raw: |
         if test -x /usr/bin/python3; then

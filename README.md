@@ -20,22 +20,31 @@ Ansible управляет установкой. После первоначал
 не должен перезаписывать эти настройки.
 В нынешнем коде Omnissiah также может участвовать в сети WireGuard.
 
-## Скачать папку на control и запустить
+## Установка с control через Git
 
-Для отдельной ВМ `control` подготовлен **[установщик из скачанной папки](docs/CONTROL.md)**.
-Скачайте ZIP ветки `feat/ansible-bootstrap` через GitHub, распакуйте на control
-и в каталоге проекта выполните:
+На отдельной ВМ `control`:
 
 ```bash
+sudo apt-get update
+sudo apt-get install -y git
+git clone https://github.com/kmvkos/Omnissiah-Network.git
+cd Omnissiah-Network
 bash control-install.sh --password-auth
 ```
 
-Он установит Ansible, спросит количество Magos, адреса узлов и SSH-пользователя,
-подготовит inventory, сохранит SSH/sudo-пароли в Ansible Vault,
-проверит доступ на всех узлах и запустит раскатку. При повторном запуске
-с `--skip-system-packages` потребуется только пароль Vault.
-Для отдельной проверки доступа: `bash control-install.sh --access-only`. Git-клон для этого способа не нужен.
-`control` управляет установкой и не входит в список VPN-узлов.
+Установщик подготовит Python/Ansible/SSH/sshpass на control, спросит количество
+Magos, адреса и SSH-пользователя, сохранит SSH/sudo-пароли в Ansible Vault и
+запустит установку на узлах. Control не входит в список VPN-узлов.
+
+Обновление и повторный запуск:
+
+```bash
+git pull --ff-only
+bash control-install.sh --skip-system-packages
+```
+
+Inventory и Vault остаются локальными и не попадают в Git. Переход из старой
+папки ZIP, диагностика sudo и подробности: **[docs/CONTROL.md](docs/CONTROL.md)**.
 
 ## Запуск из Git-клона через Ansible
 

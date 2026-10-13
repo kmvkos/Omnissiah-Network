@@ -1,4 +1,4 @@
-# Установка из скачанной папки на control
+# Установка и обновление с control через Git
 
 Нужны отдельная ВМ control, одна Omnissiah и любое необходимое число Magos:
 
@@ -12,7 +12,46 @@
 После установки его можно выключить; работающие компоненты от него не зависят.
 Он понадобится для следующего обновления или добавления узлов.
 
-## Скачать и запустить
+## Клонировать и запустить
+
+```bash
+sudo apt-get update
+sudo apt-get install -y git
+git clone https://github.com/kmvkos/Omnissiah-Network.git
+cd Omnissiah-Network
+bash control-install.sh --password-auth
+```
+
+Для публичного репозитория учётные данные GitHub не требуются.
+Для приватного используйте свой настроенный SSH-доступ или GitHub token.
+
+Обновление на control:
+
+```bash
+git pull --ff-only
+bash control-install.sh --skip-system-packages
+```
+
+Не меняйте tracked-исходники прямо на control: playbook использует только
+закоммиченный Git revision. `inventory.yml`, Vault, venv и artifacts локальные,
+Git их не перезаписывает.
+
+### Перейти из папки ZIP, сохранив настройки
+
+Из `/home/fabricator` после клонирования:
+
+```bash
+install -m 0600 /home/fabricator/Omnissiah-Network-feat-ansible-bootstrap/ansible/inventory.yml /home/fabricator/Omnissiah-Network/ansible/inventory.yml
+install -m 0600 /home/fabricator/Omnissiah-Network-feat-ansible-bootstrap/ansible/credentials.vault.yml /home/fabricator/Omnissiah-Network/ansible/credentials.vault.yml
+cd /home/fabricator/Omnissiah-Network
+bash control-install.sh --skip-system-packages
+```
+
+Скопируйте Vault, если парольный режим уже был настроен. Venv создаётся заново
+в новом каталоге; прежний переносить не нужно из-за абсолютных путей внутри.
+БД, ключи и сертификаты на узлах сохраняются при повторной раскатке.
+
+## Запуск из папки без Git
 
 1. В GitHub откройте ветку `feat/ansible-bootstrap` и выберите **Code → Download ZIP**.
    Репозиторий приватный: скачайте архив через браузер, войдя в свой аккаунт.
@@ -159,7 +198,18 @@ sudo -k
 sudo id -u
 ```
 
-Ожидается `0` после ввода пароля. Если sudo отсутствует или пользователь
+Ожидается `0` после ввода пароля.
+
+В установщике ожидание SSH/sudo увеличено до 60 секунд (Ansible показывает
+до 62 секунд для sudo); pipelining и повторное использование SSH-сессий
+отключены для bootstrap. До sudo выводятся SSH-пользователь, группы,
+hostname и результат ограниченной проверки `sudo -n true`.
+
+Если появляется `HOSTNAME_RESOLUTION_SLOW_OR_MISSING`, локальный hostname
+не разрешился за 5 секунд. Это возможная причина задержки sudo, а не
+доказательство неверного пароля. После получения root полный bootstrap
+добавляет отсутствующую локальную запись hostname в `/etc/hosts`.
+Режим `--access-only` показывает диагностику без изменения `/etc/hosts`. Если sudo отсутствует или пользователь
 не имеет прав, выполните из консоли ВМ под root (подставьте свой SSH-логин):
 
 ```bash

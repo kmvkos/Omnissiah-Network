@@ -79,3 +79,26 @@ class Connection(local.Connection):
     assert 'TASK [controller :' not in output
     assert "Read each node's public CSR" not in output
     assert 'TASK [services :' not in output
+
+
+def test_hostname_bootstrap_repairs_missing_mapping_once(tmp_path):
+    import yaml
+    plays = yaml.safe_load((ROOT / 'ansible/site.yml').read_text())
+    bootstrap = next(play for play in plays if play.get('name') == 'Bootstrap Python and prepare every Linux node')
+    raw = bootstrap['pre_tasks'][0]['ansible.builtin.raw']
+    hosts = tmp_path / 'hosts'; hosts.write_text('127.0.0.1 localhost\n')
+    commands = tmp_path / 'bin'; commands.mkdir()
+    hostname = commands / 'hostname'; hostname.write_text("#!/bin/sh\nprintf 'magos02\\n'\n"); hostname.chmod(0o755)
+    getent = commands / 'getent'
+    getent.write_text(f'''#!/bin/sh
+awk -v host="$2" '$2 == host {{found=1}} END {{exit(!found)}}' {hosts}
+'''); getent.chmod(0o755)
+    environment = dict(os.environ, PATH=str(commands) + ':' + os.environ['PATH'])
+    command = ['sh', '-c', raw.replace('/etc/hosts', str(hosts))]
+    first = subprocess.run(command, capture_output=True, text=True, env=environment, timeout=10)
+    assert first.returncode == 0 and 'LOCAL_HOSTNAME_MAPPING_ADDED' in first.stdout
+    assert '127.0.1.1 magos02\n' in hosts.read_text()
+    saved = hosts.read_bytes()
+    second = subprocess.run(command, capture_output=True, text=True, env=environment, timeout=10)
+    assert second.returncode == 0 and 'HOSTNAME_ALREADY_RESOLVES' in second.stdout
+    assert hosts.read_bytes() == saved
