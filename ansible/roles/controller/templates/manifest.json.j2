@@ -1,0 +1,15 @@
+{
+  "https_port": {{ omnissiah_https_port | int }},
+  "admin_username": {{ omnissiah_admin_username | to_json }},
+  "nodes": [
+{% for host in groups.omnissiah + groups.magos %}
+    {
+      "name": {{ host | to_json }},
+      "role": {{ ('Omnissiah' if host in groups.omnissiah else 'Magos') | to_json }},
+      "management_ip": {{ hostvars[host].ansible_host | to_json }},
+      "vpn_address": {{ hostvars[host].omnissiah_vpn_address | to_json }},
+      "pki_directory": {{ (omnissiah_state_dir ~ '/pki') | to_json }}
+    }{{ ',' if not loop.last else '' }}
+{% endfor %}
+  ]
+}

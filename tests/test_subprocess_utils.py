@@ -3,8 +3,8 @@
 """
 import pytest
 from unittest.mock import patch, MagicMock
-from nmc_utils.subprocess_utils import run_command, check_command_exists, get_wg_status
-from nmc_core.nmc_exceptions import NetworkError, SecurityError, WireGuardError
+from omnissiah_utils.subprocess_utils import run_command, check_command_exists, get_wg_status
+from omnissiah_core.nmc_exceptions import NetworkError, SecurityError, WireGuardError
 
 
 def test_run_command_success():
@@ -57,7 +57,7 @@ def test_run_command_file_not_found():
 
 def test_check_command_exists():
     """Тест проверки существования команды"""
-    with patch('src.utils.subprocess_utils.run_command') as mock_run:
+    with patch('omnissiah_utils.subprocess_utils.run_command') as mock_run:
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_run.return_value = mock_result
@@ -67,7 +67,7 @@ def test_check_command_exists():
 
 def test_get_wg_status():
     """Тест получения статуса WireGuard"""
-    with patch('src.utils.subprocess_utils.run_command') as mock_run:
+    with patch('omnissiah_utils.subprocess_utils.run_command') as mock_run:
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stdout = "interface: wg0"

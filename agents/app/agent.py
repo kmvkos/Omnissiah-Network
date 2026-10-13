@@ -13,11 +13,29 @@ import requests
 # Создаем Flask приложение через create_app для правильной инициализации БД
 app = create_app()
 
+import os
+from app.config import load_config
+
+with app.app_context():
+    db.create_all()
+
+
+@app.before_request
+def require_controller_identity():
+    config = load_config()
+    if not config.get('mtls_required') or not request.path.startswith('/api/'):
+        return None
+    from proxy_identity import proxy_identity
+    if proxy_identity() != config.get('controller_name'):
+        return jsonify(error='Controller certificate required'), 403
+
 # В ZTN архитектуре: проверяем и регистрируем ключи при первом запуске
 print("[agent] 🔐 Проверка и регистрация ключей WireGuard...")
-check_and_register_keys()
+if load_config().get('manage_wireguard', True):
+    check_and_register_keys()
 
-start_heartbeat_loop()
+if os.getenv('OMNISSIAH_AGENT_BACKGROUND', 'true').lower() == 'true':
+    start_heartbeat_loop()
 
 @app.route("/health")
 def health():

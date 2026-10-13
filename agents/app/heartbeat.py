@@ -37,7 +37,7 @@ def get_interfaces_with_ips():
         agent_config = load_config()
         # КРИТИЧНО: bootstrap_config использует 'node_name', а не 'name'
         node_name = agent_config.get('name') or agent_config.get('node_name')
-        if node_name:
+        if node_name and agent_config.get('manage_wireguard', True):
             # Получаем IP из ip_pool
             ip_pool = agent_config.get('ip_pool', '')
             if ip_pool:
@@ -94,12 +94,13 @@ def send_heartbeat(config):
         log(f"[heartbeat] ❌ node_name не найден в конфигурации. Доступные ключи: {list(config.keys())}")
         return False
     
-    wireguard_enabled = check_wireguard_status(node_name) if node_name else False
+    wireguard_enabled = (check_wireguard_status(node_name)
+                         if node_name and config.get('manage_wireguard', True) else False)
 
     data = {
         'public_key': config.get('public_key', ''),
         'name': node_name,  # Используем node_name из конфигурации
-        'local_ip': get_local_ip(),
+        'local_ip': config.get('management_ip') or get_local_ip(),
         'status': 'active',
         'clients': [],  # позже заполним, пока пусть будет пусто
         'interfaces': interfaces,  # Список интерфейсов с IP адресами
@@ -146,7 +147,11 @@ def send_heartbeat(config):
     else:
         log(f"[heartbeat] ℹ️  mTLS не включен или сертификаты не указаны в конфигурации")
     
-    # Fallback: обычный HTTP запрос (если mTLS не настроен или не работает)
+    # Managed deployments must never downgrade after a TLS/authentication error.
+    if config.get('mtls_required'):
+        return False
+
+    # Fallback for legacy deployments that do not require mTLS.
     try:
         log(f"[heartbeat] 🌐 Попытка отправки без mTLS (verify=False)...")
         response = requests.post(url, json=data, headers=headers, timeout=10, verify=False)
@@ -176,6 +181,8 @@ def send_traffic_logs(config):
     """
     Собирает и отправляет логи трафика на Omnissiah
     """
+    if not config.get('manage_wireguard', True):
+        return True
     try:
         from app.traffic_collector import collect_traffic_logs
         
@@ -208,7 +215,10 @@ def send_traffic_logs(config):
             except Exception as e:
                 print(f"[traffic] ⚠️  Ошибка mTLS отправки трафика, пробуем без mTLS: {e}")
         
-        # Fallback: обычный HTTP запрос
+        if config.get('mtls_required'):
+            return False
+
+        # Fallback for legacy deployments.
         try:
             response = requests.post(url, json=data, headers=headers, timeout=10, verify=False)
             response.raise_for_status()
@@ -246,7 +256,7 @@ def heartbeat_loop():
             
             # В ZTN архитектуре: проверяем и регистрируем ключи если нужно
             # Пробуем регистрировать ключи первые 10 циклов (5 минут) или пока не зарегистрированы
-            if key_registration_attempts < 10:
+            if config.get('manage_wireguard', True) and key_registration_attempts < 10:
                 from app.key_registration import check_and_register_keys
                 if check_and_register_keys():
                     key_registration_attempts = 999  # Помечаем как успешно зарегистрировано

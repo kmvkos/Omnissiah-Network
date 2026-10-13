@@ -1,0 +1,157 @@
+---
+- name: Validate inventory and prepare sources on control
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  tags: [prepare]
+  tasks:
+    - name: Require one controller and at least one Magos
+      ansible.builtin.assert:
+        that:
+          - groups.get('omnissiah', []) | length == 1
+          - groups.get('magos', []) | length > 0
+          - groups.omnissiah | intersect(groups.magos) | length == 0
+          - groups.all | difference(groups.omnissiah + groups.magos) | length == 0
+          - not ansible_check_mode
+        fail_msg: Inventory must contain one Omnissiah and one or more Magos, without other hosts.
+    - name: Validate required host parameters
+      ansible.builtin.assert:
+        that:
+          - item is match('^[A-Za-z][A-Za-z0-9_-]{0,14}$')
+          - hostvars[item].ansible_host is defined
+          - hostvars[item].omnissiah_vpn_address is defined
+        fail_msg: Use safe node names (up to 15 characters), IPv4 ansible_host and a VPN address for every host.
+      loop: "{{ groups.omnissiah + groups.magos }}"
+    - name: Create local artifacts directory
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/artifacts"
+        state: directory
+        mode: '0700'
+    - name: Build the enrollment manifest for validation before accessing VMs
+      ansible.builtin.template:
+        src: roles/controller/templates/manifest.json.j2
+        dest: "{{ playbook_dir }}/artifacts/inventory-manifest.json"
+        mode: '0600'
+    - name: Validate addresses and identity uniqueness locally
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - "{{ playbook_dir }}/../deploy/validate_manifest.py"
+          - "{{ playbook_dir }}/artifacts/inventory-manifest.json"
+      changed_when: false
+    - name: Package sources from Git or a downloaded project folder
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - "{{ playbook_dir }}/../deploy/package_source.py"
+          - --source
+          - "{{ playbook_dir }}/.."
+          - --output-directory
+          - "{{ playbook_dir }}/artifacts"
+      register: source_package
+      changed_when: (source_package.stdout | from_json).changed
+    - name: Share artifact location with deployment plays
+      ansible.builtin.set_fact:
+        source_revision: "{{ (source_package.stdout | from_json).revision }}"
+        source_archive: "{{ (source_package.stdout | from_json).archive }}"
+
+- import_playbook: access.yml
+
+- name: Bootstrap Python and prepare every Linux node
+  hosts: omnissiah:magos
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tags: [deploy]
+  pre_tasks:
+    - name: Add a local hostname mapping when hostname lookup is missing or slow
+      ansible.builtin.raw: |
+        node_hostname=$(hostname)
+        if awk -v name="$node_hostname" '{for(i=2;i<=NF;i++) {if($i ~ /^#/) break; if($i==name) found=1}} END{exit(!found)}' /etc/hosts; then
+          echo HOSTNAME_ALREADY_RESOLVES
+        elif timeout 5 getent hosts "$node_hostname" >/dev/null 2>&1; then
+          echo HOSTNAME_ALREADY_RESOLVES
+        else
+          printf '127.0.1.1 %s\n' "$node_hostname" >> /etc/hosts
+          echo LOCAL_HOSTNAME_MAPPING_ADDED
+        fi
+      register: hostname_bootstrap
+      changed_when: "'LOCAL_HOSTNAME_MAPPING_ADDED' in hostname_bootstrap.stdout"
+    - name: Install Python before using Python-based modules
+      ansible.builtin.raw: |
+        if test -x /usr/bin/python3; then
+          echo PYTHON_ALREADY_PRESENT
+        else
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update && apt-get install -y python3 && echo PYTHON_INSTALLED
+        fi
+      register: python_bootstrap
+      changed_when: "'PYTHON_INSTALLED' in python_bootstrap.stdout"
+      when: not ansible_check_mode
+    - name: Gather system facts
+      ansible.builtin.setup:
+    - name: Require Debian 13 and normal deployment mode
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.distribution == 'Debian'
+          - ansible_facts.distribution_major_version == '13'
+          - not ansible_check_mode
+        fail_msg: Initial bootstrap supports Debian 13; --check cannot simulate certificate issuance and enrollment.
+  roles:
+    - common
+
+- name: Issue certificates on Omnissiah and enroll inventory nodes
+  hosts: omnissiah
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tags: [deploy]
+  roles:
+    - controller
+
+- name: Install node identities and services
+  hosts: omnissiah:magos
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tags: [deploy]
+  roles:
+    - services
+
+- name: Verify agents and authenticated management traffic
+  hosts: magos
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tags: [deploy]
+  tasks:
+    - name: Send heartbeat with the agent certificate and validate the server certificate
+      ansible.builtin.command:
+        argv:
+          - "{{ omnissiah_project_dir }}/venv/bin/python"
+          - "{{ omnissiah_project_dir }}/deploy/probe.py"
+          - heartbeat
+          - --config
+          - "{{ omnissiah_state_dir }}/bootstrap_config.json"
+      register: heartbeat_probe
+      changed_when: false
+      retries: 10
+      delay: 3
+      until: heartbeat_probe.rc == 0
+    - name: Verify agent HTTPS from the controller using its client identity
+      ansible.builtin.command:
+        argv:
+          - "{{ omnissiah_project_dir }}/venv/bin/python"
+          - "{{ omnissiah_project_dir }}/deploy/probe.py"
+          - agent
+          - --url
+          - "https://{{ ansible_host }}:{{ omnissiah_https_port }}/health"
+          - --pki
+          - "{{ omnissiah_state_dir }}/pki"
+      delegate_to: "{{ groups.omnissiah[0] }}"
+      changed_when: false
+    - name: Report successful enrollment
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: authenticated heartbeat and controller-to-agent HTTPS succeeded. VPN is not yet configured."

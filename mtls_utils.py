@@ -28,6 +28,17 @@ def generate_ca_certificate(ca_dir):
         backend=default_backend()
     )
     ca_key_path = ca_dir / "ca.key"
+    ca_cert_path = ca_dir / "ca.crt"
+    if ca_key_path.exists() != ca_cert_path.exists():
+        raise ValueError("Incomplete CA: restore the missing file instead of regenerating trust")
+    if ca_key_path.exists():
+        existing_key = serialization.load_pem_private_key(ca_key_path.read_bytes(), password=None)
+        existing_cert = x509.load_pem_x509_certificate(ca_cert_path.read_bytes())
+        if existing_key.public_key().public_numbers() != existing_cert.public_key().public_numbers():
+            raise ValueError("CA certificate does not match its private key")
+        if not existing_cert.extensions.get_extension_for_class(x509.BasicConstraints).value.ca:
+            raise ValueError("Existing certificate is not a CA")
+        return str(ca_cert_path), str(ca_key_path)
     with open(ca_key_path, "wb") as f:
         f.write(ca_key.private_bytes(
             encoding=serialization.Encoding.PEM,

@@ -1,0 +1,15 @@
+{
+  "name": {{ inventory_hostname | to_json }},
+  "role": "Magos",
+  "management_ip": {{ ansible_host | to_json }},
+  "controller_name": {{ groups.omnissiah[0] | to_json }},
+  "server_url": {{ ('https://' ~ hostvars[groups.omnissiah[0]].ansible_host ~ ':' ~ (omnissiah_https_port | string)) | to_json }},
+  "ip_pool": {{ omnissiah_vpn_address | to_json }},
+  "listen_port": 51820,
+  "manage_wireguard": false,
+  "mtls_enabled": true,
+  "mtls_required": true,
+  "mtls_cert_file": {{ (omnissiah_state_dir ~ '/pki/identity.crt') | to_json }},
+  "mtls_key_file": {{ (omnissiah_state_dir ~ '/pki/identity.key') | to_json }},
+  "mtls_ca_cert_file": {{ (omnissiah_state_dir ~ '/pki/ca.crt') | to_json }}
+}

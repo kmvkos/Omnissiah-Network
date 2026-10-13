@@ -1,0 +1,21 @@
+server {
+    listen {{ ansible_host }}:{{ omnissiah_https_port }} ssl;
+    server_name {{ inventory_hostname }} {{ ansible_host }};
+    ssl_certificate {{ omnissiah_state_dir }}/pki/identity.crt;
+    ssl_certificate_key {{ omnissiah_state_dir }}/pki/identity.key;
+    ssl_client_certificate {{ omnissiah_state_dir }}/pki/ca.crt;
+    ssl_verify_client {{ 'optional' if inventory_hostname in groups.omnissiah else 'on' }};
+    ssl_verify_depth 1;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    client_max_body_size 10m;
+
+    location / {
+        proxy_pass http://127.0.0.1:{{ 33787 if inventory_hostname in groups.omnissiah else 5001 }};
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-SSL-Client-Verify $ssl_client_verify;
+        proxy_set_header X-SSL-Client-Cert $ssl_client_escaped_cert;
+        proxy_buffering off;
+        proxy_read_timeout 120s;
+    }
+}

@@ -1,0 +1,12 @@
+---
+- name: Verify SSH login using configured credentials
+  hosts: omnissiah:magos
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  tasks:
+    - name: Verify SSH authentication without requiring remote Python
+      vars:
+        ansible_become: false
+      ansible.builtin.raw: 'true'
+      changed_when: false

@@ -1,0 +1,91 @@
+---
+- name: Create private CA and public issuance directories
+  ansible.builtin.file:
+    path: "{{ omnissiah_state_dir }}/pki/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  loop: [ca, requests, issued]
+- name: Create the CA once and preserve existing trust
+  ansible.builtin.command:
+    argv: [/usr/bin/python3, "{{ omnissiah_project_dir }}/deploy/pki.py", ca, --directory, "{{ omnissiah_state_dir }}/pki/ca"]
+  register: ca_result
+  changed_when: (ca_result.stdout | from_json).changed
+- name: Read each node's public CSR
+  ansible.builtin.slurp:
+    src: "{{ omnissiah_state_dir }}/pki/identity.csr"
+  delegate_to: "{{ item }}"
+  loop: "{{ groups.omnissiah + groups.magos }}"
+  register: node_csrs
+- name: Place public CSRs on the issuer
+  ansible.builtin.copy:
+    content: "{{ item.content | b64decode }}"
+    dest: "{{ omnissiah_state_dir }}/pki/requests/{{ item.item }}.csr"
+    mode: '0644'
+  loop: "{{ node_csrs.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+- name: Sign or renew each certificate without changing private keys
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - "{{ omnissiah_project_dir }}/deploy/pki.py"
+      - sign
+      - --ca-directory
+      - "{{ omnissiah_state_dir }}/pki/ca"
+      - --csr
+      - "{{ omnissiah_state_dir }}/pki/requests/{{ item }}.csr"
+      - --certificate
+      - "{{ omnissiah_state_dir }}/pki/issued/{{ item }}.crt"
+  loop: "{{ groups.omnissiah + groups.magos }}"
+  register: certificates_signed
+  changed_when: (certificates_signed.stdout | from_json).changed
+- name: Read signed public certificates
+  ansible.builtin.slurp:
+    src: "{{ omnissiah_state_dir }}/pki/issued/{{ item }}.crt"
+  loop: "{{ groups.omnissiah + groups.magos }}"
+  register: issued_certificates
+- name: Read the public CA certificate
+  ansible.builtin.slurp:
+    src: "{{ omnissiah_state_dir }}/pki/ca/ca.crt"
+  register: public_ca
+- name: Save the public CA on the administrator workstation
+  ansible.builtin.fetch:
+    src: "{{ omnissiah_state_dir }}/pki/ca/ca.crt"
+    dest: "{{ playbook_dir }}/artifacts/ca.crt"
+    flat: true
+- name: Prepare node enrollment manifest
+  ansible.builtin.template:
+    src: manifest.json.j2
+    dest: "{{ omnissiah_state_dir }}/inventory-manifest.json"
+    owner: root
+    mode: '0600'
+- name: Enroll nodes and create initial administrator locally
+  ansible.builtin.command:
+    argv:
+      - "{{ omnissiah_project_dir }}/venv/bin/python"
+      - "{{ omnissiah_project_dir }}/deploy/bootstrap.py"
+      - --project
+      - "{{ omnissiah_project_dir }}"
+      - --state
+      - "{{ omnissiah_state_dir }}"
+      - --manifest
+      - "{{ omnissiah_state_dir }}/inventory-manifest.json"
+  environment:
+    OMNISSIAH_INITIAL_ADMIN_PASSWORD: "{{ omnissiah_initial_admin_password | default('') }}"
+  register: enrollment
+  changed_when: (enrollment.stdout | from_json).changed
+  no_log: true
+- name: Set environment ownership
+  ansible.builtin.file:
+    path: "{{ omnissiah_project_dir }}/.env"
+    owner: root
+    group: "{{ omnissiah_service_user }}"
+    mode: '0640'
+- name: Set application database ownership
+  ansible.builtin.file:
+    path: "{{ omnissiah_state_dir }}/data/vpngate.db"
+    owner: "{{ omnissiah_service_user }}"
+    group: "{{ omnissiah_service_user }}"
+    mode: '0600'

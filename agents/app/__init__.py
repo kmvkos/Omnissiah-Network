@@ -11,8 +11,8 @@ def create_app():
     # Определяем путь к базе данных относительно расположения файла __init__.py
     # Это гарантирует правильный путь независимо от того, откуда запускается скрипт
     base_dir = Path(__file__).parent.parent  # Директория NMC_WGr
-    database_dir = base_dir / "database"
-    database_dir.mkdir(exist_ok=True)  # Создаем директорию если её нет
+    database_dir = Path(os.getenv('OMNISSIAH_AGENT_STATE_DIR', str(base_dir / "database")))
+    database_dir.mkdir(parents=True, exist_ok=True)
     
     # Используем абсолютный путь к базе данных
     database_path = database_dir / "retra.db"
