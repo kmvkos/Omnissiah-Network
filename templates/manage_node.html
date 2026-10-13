@@ -1,0 +1,344 @@
+{% extends 'layout.html' %}
+{% block title %}Управление узлом: {{ node.name }}{% endblock %}
+
+{% block styles %}
+<style>
+    .node-management-card {
+        background: var(--bg-card);
+        backdrop-filter: blur(20px);
+        border: 1px solid var(--border-color);
+        border-radius: 16px;
+        padding: 2rem;
+        margin-bottom: 1.5rem;
+    }
+    
+    .action-buttons {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        margin-top: 1.5rem;
+    }
+    
+    .node-info-table {
+        width: 100%;
+        margin-top: 1rem;
+    }
+    
+    .node-info-table td {
+        padding: 0.75rem 0;
+        border-bottom: 1px solid var(--border-light);
+    }
+    
+    .node-info-table td:first-child {
+        font-weight: 600;
+        color: var(--text-primary);
+        width: 40%;
+    }
+    
+    .node-info-table td:last-child {
+        color: var(--text-secondary);
+    }
+    
+    .premium-table {
+        margin: 0;
+    }
+    
+    .premium-table thead th {
+        border-bottom: 2px solid var(--border-color);
+        color: var(--text-primary);
+        font-weight: 600;
+    }
+    
+    .premium-table tbody tr {
+        transition: var(--transition);
+    }
+    
+    .premium-table tbody tr:hover {
+        background: var(--bg-tertiary);
+    }
+    
+    .premium-table td {
+        vertical-align: middle;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>
+            <i class="bi bi-{% if node.role == 'Magos' %}hdd-network{% else %}pc-display{% endif %} me-2"></i>
+            Управление узлом: {{ node.name }}
+        </h2>
+        <a href="{{ url_for('dashboard') }}" class="btn btn-outline-modern">
+            <i class="bi bi-arrow-left me-2"></i>Назад к дашборду
+        </a>
+    </div>
+
+    <!-- Информация об узле -->
+    <div class="node-management-card">
+        <h3 class="card-title-modern mb-3">
+            <i class="bi bi-info-circle me-2"></i>Информация об узле
+        </h3>
+        <table class="node-info-table">
+            <tr>
+                <td>Имя:</td>
+                <td>{{ node.name }}</td>
+            </tr>
+            <tr>
+                <td>Роль:</td>
+                <td><span class="badge badge-{% if node.role == 'Magos' %}info-modern{% else %}secondary{% endif %}">{{ node.role }}</span></td>
+            </tr>
+            <tr>
+                <td>IP-пул:</td>
+                <td><code>{{ node.ip_pool }}</code></td>
+            </tr>
+            <tr>
+                <td>Endpoint:</td>
+                <td><code>{{ node.endpoint or '-' }}</code></td>
+            </tr>
+            <tr>
+                <td>Порт:</td>
+                <td>{{ node.listen_port }}</td>
+            </tr>
+            <tr>
+                <td>Статус:</td>
+                <td>
+                    <span class="badge {% if node.status == 'active' %}badge-success-modern{% else %}badge-danger-modern{% endif %}">
+                        {{ STATUS_CHOICES[node.status] if node.status in STATUS_CHOICES else node.status }}
+                    </span>
+                </td>
+            </tr>
+            {% if parent %}
+            <tr>
+                <td>Родительский узел:</td>
+                <td>{{ parent.name }} ({{ parent.role }})</td>
+            </tr>
+            {% endif %}
+        </table>
+    </div>
+
+    <!-- Действия -->
+    <div class="node-management-card">
+        <h3 class="card-title-modern mb-3">
+            <i class="bi bi-tools me-2"></i>Действия
+        </h3>
+        
+        <div class="action-buttons">
+            <button type="button" class="btn btn-modern {% if node.vpn_status == 'online' %}btn-warning-modern{% else %}btn-accent-modern{% endif %}" 
+                    id="toggleVpnBtn" onclick="toggleVPN({{ node.id }})">
+                <i class="bi bi-{% if node.vpn_status == 'online' %}stop{% else %}play{% endif %}-circle me-2"></i>
+                {% if node.vpn_status == 'online' %}Выключить VPN{% else %}Включить VPN{% endif %}
+            </button>
+            
+            <button type="button" class="btn btn-modern btn-accent-modern" onclick="updateSoftware({{ node.id }})">
+                <i class="bi bi-arrow-repeat me-2"></i>Обновить ПО
+            </button>
+            
+            <button type="button" class="btn btn-modern btn-danger-modern" onclick="confirmDeleteNode({{ node.id }})">
+                <i class="bi bi-trash me-2"></i>Удалить узел
+            </button>
+        </div>
+    </div>
+
+    <!-- Подключенные узлы (только для Magos) -->
+    {% if node.role == 'Magos' and peers %}
+    <div class="node-management-card">
+        <h3 class="card-title-modern mb-3">
+            <i class="bi bi-diagram-3 me-2"></i>Подключенные узлы
+            <span class="badge badge-secondary ms-2">{{ peers|length }}</span>
+        </h3>
+        <div class="table-responsive">
+            <table class="table table-dark premium-table">
+                <thead>
+                    <tr>
+                        <th>Имя</th>
+                        <th>Роль</th>
+                        <th>VPN IP</th>
+                        <th>Heartbeat IP</th>
+                        <th>VPN статус</th>
+                        <th>mTLS статус</th>
+                        <th>Статус</th>
+                        <th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for peer in peers %}
+                    <tr>
+                        <td><strong>{{ peer.name }}</strong></td>
+                        <td><span class="badge badge-info-modern">{{ peer.role }}</span></td>
+                        <td><code>{{ peer.vpn_ip or '-' }}</code></td>
+                        <td>
+                            <code>{{ peer.heartbeat_ip_display or '-' }}</code>
+                            {% if peer.heartbeat_ips_display|length > 1 %}
+                                <span class="badge badge-secondary ms-1" title="Всего {{ peer.heartbeat_ips_display|length }} интерфейсов">
+                                    +{{ peer.heartbeat_ips_display|length - 1 }}
+                                </span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if peer.vpn_status_display == 'online' %}
+                                <span class="badge badge-success-modern">Online</span>
+                            {% else %}
+                                <span class="badge badge-danger-modern">Offline</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if peer.mtls_status_display == 'online' %}
+                                <span class="badge badge-success-modern">Online</span>
+                            {% else %}
+                                <span class="badge badge-danger-modern">Offline</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="badge {% if peer.status == 'active' %}badge-success-modern{% else %}badge-danger-modern{% endif %}">
+                                {{ STATUS_CHOICES.get(peer.status, peer.status) }}
+                            </span>
+                        </td>
+                        <td>
+                            <a href="{{ url_for('manage_node', node_id=peer.id) }}" class="btn btn-sm btn-outline-modern" title="Настройки узла">
+                                <i class="bi bi-gear"></i>
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+function toggleVPN(nodeId) {
+    const btn = document.getElementById('toggleVpnBtn');
+    const isEnabled = btn.textContent.includes('Выключить');
+    
+    if (!confirm(`Вы уверены, что хотите ${isEnabled ? 'выключить' : 'включить'} VPN на узле?`)) {
+        return;
+    }
+    
+    btn.disabled = true;
+    
+    // КРИТИЧНО: Запрашиваем пароль и проверяем его
+    const password = prompt('Введите пароль SSH:');
+    if (password === null || password.trim() === '') {
+        alert('Ошибка: Пароль обязателен для подключения!');
+        btn.disabled = false;
+        return;
+    }
+    
+    const endpoint = isEnabled ? `/api/ssh/disable_vpn/${nodeId}` : `/api/ssh/enable_vpn/${nodeId}`;
+    
+    // КРИТИЧНО: Используем правильные имена полей
+    const requestData = {
+        ssh_ip: '{{ node.endpoint or node.ip_pool.split("/")[0] }}',
+        ssh_user: 'root',
+        ssh_password: password
+    };
+    
+    console.log('Отправляем запрос:', { ...requestData, ssh_password: '***' });
+    
+    fetch(endpoint, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`VPN успешно ${isEnabled ? 'выключен' : 'включен'}`);
+            location.reload();
+        } else {
+            alert(`Ошибка: ${data.error || 'Неизвестная ошибка'}`);
+            btn.disabled = false;
+        }
+    })
+    .catch(error => {
+        alert(`Ошибка: ${error.message}`);
+        btn.disabled = false;
+    });
+}
+
+function updateSoftware(nodeId) {
+    if (!confirm('Вы уверены, что хотите обновить ПО на узле?')) {
+        return;
+    }
+    
+    const btn = event.target.closest('button');
+    btn.disabled = true;
+    
+    fetch(`/api/ssh/update_software/${nodeId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            ssh_ip: '{{ node.endpoint or node.ip_pool.split("/")[0] }}',
+            ssh_user: 'root',
+            ssh_password: prompt('Введите пароль SSH:')
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('ПО успешно обновлено');
+            location.reload();
+        } else {
+            alert(`Ошибка: ${data.error || 'Неизвестная ошибка'}`);
+            btn.disabled = false;
+        }
+    })
+    .catch(error => {
+        alert(`Ошибка: ${error.message}`);
+        btn.disabled = false;
+    });
+}
+
+function confirmDeleteNode(nodeId) {
+    if (!confirm('ВНИМАНИЕ! Это действие удалит узел, ПО, сервис, отключит VPN и политики безопасности. Продолжить?')) {
+        return;
+    }
+    
+    if (!confirm('Вы ТОЧНО уверены? Это действие необратимо!')) {
+        return;
+    }
+    
+    const deleteAll = confirm('Удалить ПО и файлы на удаленном сервере?');
+    const deleteService = confirm('Удалить systemd сервис?');
+    const disableVPN = confirm('Отключить VPN и удалить конфигурацию WireGuard?');
+    const removeFirewall = confirm('Отключить политики безопасности iptables?');
+    
+    fetch(`/api/delete_node/${nodeId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            ssh_ip: '{{ node.endpoint or node.ip_pool.split("/")[0] }}',
+            ssh_user: 'root',
+            ssh_password: prompt('Введите пароль SSH:'),
+            delete_software: deleteAll,
+            delete_service: deleteService,
+            disable_vpn: disableVPN,
+            remove_firewall: removeFirewall
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Узел успешно удален');
+            window.location.href = '{{ url_for("dashboard") }}';
+        } else {
+            alert(`Ошибка: ${data.error || 'Неизвестная ошибка'}`);
+        }
+    })
+    .catch(error => {
+        alert(`Ошибка: ${error.message}`);
+    });
+}
+</script>
+{% endblock %}
+

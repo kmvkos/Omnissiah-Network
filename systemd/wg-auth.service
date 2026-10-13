@@ -1,0 +1,19 @@
+[Unit]
+Description=WireGuard Auth Service
+After=network.target
+
+[Service]
+User=root
+Group=root
+WorkingDirectory=/opt/wireguard-auth #переименовать. зависимость от папки в которой находится прилож
+Environment="PATH=/usr/bin"
+#ExecStart=/usr/bin/gunicorn --workers 3 --bind 0.0.0.0:33787 app:app
+ExecStart=/usr/bin/python3 app.py
+Restart=always
+RestartSec=10
+
+#Если используете напрямую Python
+#ExecStart=/usr/bin/python3 app.py
+
+[Install]
+WantedBy=multi-user.target

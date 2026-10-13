@@ -1,0 +1,148 @@
+{% extends "layout.html" %}
+{% block title %}Добавление нового узла{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+  <div class="row justify-content-center">
+    <div class="col-lg-10">
+      <div class="premium-card p-4">
+
+        <h4 class="text-gold mb-4 d-flex align-items-center">
+          <i class="bi bi-person-plus-fill me-2"></i>Добавление нового узла
+        </h4>
+
+        <form method="POST" id="peerForm">
+          {{ form.hidden_tag() }}
+
+          <div class="row g-4">
+            <!-- Имя и Роль -->
+            <div class="col-md-6">
+              <label class="form-label text-gold-50">{{ form.name.label.text }}</label>
+              {{ form.name(class="form-control bg-dark text-light border-secondary", placeholder="peer1") }}
+              {% for error in form.name.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+              {% endfor %}
+            </div>
+
+            <div class="col-md-6">
+              <label class="form-label text-gold-50">{{ form.role.label.text }}</label>
+              {{ form.role(class="form-select bg-dark text-light border-secondary", id="role") }}
+            </div>
+
+            <!-- IP -->
+            <div class="col-12">
+              <label class="form-label text-gold-50">{{ form.ip_pool.label.text }}</label>
+              <div class="input-group">
+                {{ form.ip_pool(
+                  class="form-control bg-dark text-light border-secondary",
+                  placeholder="10.0.0.2/32 или 10.0.0.0/24",
+                  list="ip-suggestions",
+                  id="ip_input"
+                ) }}
+                <button class="btn btn-outline-gold" type="button" id="refresh-ips">
+                  <i class="bi bi-arrow-clockwise"></i>
+                </button>
+              </div>
+              <small class="text-gold-50 mt-1 d-block">Из подсети: {{ omnissiah_config.ip_pool }}</small>
+              {% for error in form.ip_pool.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+              {% endfor %}
+              <datalist id="ip-suggestions">
+                {% for ip in available_ips %}
+                  <option value="{{ ip }}">
+                {% endfor %}
+              </datalist>
+            </div>
+
+            <!-- Endpoint и Центральный узел -->
+            <div class="col-md-6">
+              <label class="form-label text-gold-50">{{ form.endpoint.label.text }}</label>
+              {{ form.endpoint(class="form-control bg-dark text-light border-secondary", placeholder="1.2.3.4", id="endpoint") }}
+            </div>
+
+            <div class="col-md-6">
+              <label class="form-label text-gold-50">{{ form.parent_id.label.text }}</label>
+              {{ form.parent_id(class="form-select bg-dark text-light border-secondary", id="parent_id") }}
+            </div>
+          </div>
+
+          <!-- Кнопки -->
+          <div class="d-flex justify-content-between mt-4">
+            <a href="{{ url_for('main_node') }}" class="btn btn-outline-secondary">
+              <i class="bi bi-arrow-left"></i> Назад
+            </a>
+            <button type="submit" class="btn btn-gold" id="submitBtn">
+              <i class="bi bi-plus-circle me-1"></i> Добавить
+            </button>
+          </div>
+        </form>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const roleSelect = document.getElementById('role');
+  const parentNodeField = document.getElementById('parent_id');
+  const endpointField = document.getElementById('endpoint');
+  const ipInput = document.getElementById('ip_input');
+  const refreshBtn = document.getElementById('refresh-ips');
+  const submitBtn = document.getElementById('submitBtn');
+
+  function updateParentNodeVisibility() {
+    if (roleSelect.value === 'Cognitor') {
+      parentNodeField.closest('.mb-3').style.display = 'block';
+      parentNodeField.required = true;
+    } else {
+      parentNodeField.closest('.mb-3').style.display = 'none';
+      parentNodeField.required = false;
+    }
+  }
+
+  roleSelect.addEventListener('change', function() {
+    if (this.value === 'Magos') {
+      const mainOption = Array.from(parentNodeField.options).find(opt =>
+        opt.value === "{{ omnissiah_config.id }}" || opt.text.includes("{{ omnissiah_config.name }}")
+      );
+      if (mainOption) {
+        mainOption.selected = true;
+        updateEndpointFromSelectedNode();
+      }
+    }
+    updateParentNodeVisibility();
+  });
+
+  function updateEndpointFromSelectedNode() {
+    const selected = parentNodeField.options[parentNodeField.selectedIndex];
+    const matches = selected?.text.match(/\((.*?)\)/);
+    if (matches?.[1] && !endpointField.value) {
+      endpointField.value = matches[1];
+    }
+  }
+
+  refreshBtn.addEventListener('click', () => {
+    fetch('{{ url_for("get_available_ips") }}')
+      .then(r => r.json())
+      .then(data => {
+        const list = document.getElementById('ip-suggestions');
+        list.innerHTML = '';
+        data.ips.forEach(ip => {
+          const opt = document.createElement('option');
+          opt.value = ip;
+          list.appendChild(opt);
+        });
+        ipInput.focus(); ipInput.blur();
+      });
+  });
+
+  peerForm.addEventListener('submit', () => {
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span> Добавление...`;
+  });
+
+  updateParentNodeVisibility();
+});
+</script>
+{% endblock %}

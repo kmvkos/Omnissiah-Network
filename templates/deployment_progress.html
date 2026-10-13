@@ -1,0 +1,439 @@
+{% extends "layout.html" %}
+
+{% block title %}Развертывание узлов{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="card-modern mb-4">
+        <div class="card-header-modern">
+            <h5 class="card-title-modern">
+                <i class="bi bi-cloud-upload me-2"></i>Развертывание узлов
+            </h5>
+            <button type="button" class="btn btn-sm btn-danger-modern" id="stopDeploymentBtn" onclick="stopDeployment()" style="display: none;">
+                <i class="bi bi-stop-circle me-2"></i>Остановить развертывание
+            </button>
+        </div>
+        <div class="card-body">
+            <div id="progress-container">
+                <div class="mb-4">
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Общий прогресс</span>
+                        <span id="progress-percent">0%</span>
+                    </div>
+                    <div class="progress" style="height: 25px;">
+                        <div id="progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" 
+                             role="progressbar" style="width: 0%"
+                             aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="status-message" class="alert alert-info">
+                    <i class="bi bi-hourglass-split me-2"></i>Подготовка к развертыванию...
+                </div>
+                
+                <div id="nodes-status" class="mt-4">
+                    <h6 class="mb-3">Статус узлов:</h6>
+                    {% for node in nodes %}
+                    <div class="node-status-item mb-2 p-3 border rounded" data-node="{{ node.name }}">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <strong>{{ node.name }}</strong> 
+                                <span class="badge bg-secondary ms-2">{{ node.role }}</span>
+                            </div>
+                            <div>
+                                <span class="node-status-badge badge bg-secondary">
+                                    <i class="bi bi-hourglass-split me-1"></i>Ожидание
+                                </span>
+                            </div>
+                        </div>
+                        <div class="node-status-details mt-2 text-muted small"></div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            
+            <div id="error-container" class="mt-4" style="display: none;">
+                <div class="alert alert-danger">
+                    <h6><i class="bi bi-exclamation-triangle me-2"></i>Ошибка развертывания</h6>
+                    <div id="error-message"></div>
+                </div>
+            </div>
+            
+            <div id="success-container" class="mt-4" style="display: none;">
+                <div class="alert alert-success">
+                    <h6><i class="bi bi-check-circle me-2"></i>Развертывание завершено успешно!</h6>
+                    <div id="success-message"></div>
+                    <div class="mt-3">
+                        <a href="{{ url_for('network_deployment_wizard', step=1) }}" class="btn btn-primary">
+                            <i class="bi bi-arrow-left me-2"></i>Вернуться к мастеру
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let eventSource;
+let totalNodes = {{ nodes_count }};
+let completedNodes = 0;
+let nodeStatuses = {}; // Отслеживание статусов узлов
+
+function updateProgress(percent, status) {
+    const progressBar = document.getElementById('progress-bar');
+    const progressPercent = document.getElementById('progress-percent');
+    const statusMessage = document.getElementById('status-message');
+    
+    progressBar.style.width = percent + '%';
+    progressBar.setAttribute('aria-valuenow', percent);
+    progressPercent.textContent = Math.round(percent) + '%';
+    
+    if (status) {
+        statusMessage.innerHTML = '<i class="bi bi-info-circle me-2"></i>' + status;
+    }
+}
+
+function updateNodeStatus(nodeName, status, details) {
+    const nodeItem = document.querySelector(`[data-node="${nodeName}"]`);
+    if (!nodeItem) return;
+    
+    const badge = nodeItem.querySelector('.node-status-badge');
+    const detailsDiv = nodeItem.querySelector('.node-status-details');
+    
+    let icon, color, text;
+    if (status === 'success') {
+        icon = 'bi-check-circle';
+        color = 'bg-success';
+        text = 'Завершено';
+    } else if (status === 'error') {
+        icon = 'bi-x-circle';
+        color = 'bg-danger';
+        text = 'Ошибка';
+    } else if (status === 'in_progress') {
+        icon = 'bi-arrow-repeat';
+        color = 'bg-primary';
+        text = 'В процессе';
+    } else {
+        icon = 'bi-hourglass-split';
+        color = 'bg-secondary';
+        text = 'Ожидание';
+    }
+    
+    badge.className = `node-status-badge badge ${color}`;
+    badge.innerHTML = `<i class="bi ${icon} me-1"></i>${text}`;
+    
+    if (details) {
+        detailsDiv.textContent = details;
+    }
+}
+
+function showError(message) {
+    document.getElementById('error-container').style.display = 'block';
+    document.getElementById('error-message').textContent = message;
+    document.getElementById('progress-container').style.opacity = '0.5';
+}
+
+function showSuccess(message) {
+    document.getElementById('success-container').style.display = 'block';
+    document.getElementById('success-message').textContent = message;
+    document.getElementById('progress-bar').classList.remove('progress-bar-animated');
+    document.getElementById('progress-bar').classList.add('bg-success');
+}
+
+// Запускаем развертывание при загрузке страницы
+window.addEventListener('load', function() {
+    console.log('🚀 Страница загружена, подключаемся к SSE...');
+    console.log('🔍 Проверка: страница deployment_progress.html загружена');
+    
+    // Проверяем, есть ли активное развертывание
+    fetch('/api/deployment/status')
+        .then(response => response.json())
+        .then(data => {
+            if (data.active) {
+                updateProgress(1, 'Подключение к активному развертыванию...');
+                // Показываем кнопку остановки сразу
+                document.getElementById('stopDeploymentBtn').style.display = 'block';
+                // Обновляем статус в компоненте уведомлений
+                if (typeof window.updateDeploymentStatus === 'function') {
+                    window.updateDeploymentStatus({
+                        status: 'Активное развертывание',
+                        current_node: data.nodes[0]?.name || 'Неизвестно'
+                    });
+                }
+            }
+        })
+        .catch(err => {
+            console.error('Ошибка проверки статуса развертывания:', err);
+        });
+    
+    // Подключаемся к SSE потоку (GET запрос запускает развертывание)
+    const sseUrl = '{{ url_for("api_deployment_stream") }}';
+    console.log('📡 SSE URL:', sseUrl);
+    console.log('📡 Полный URL будет:', window.location.origin + sseUrl);
+    
+    try {
+        eventSource = new EventSource(sseUrl);
+        console.log('✅ EventSource создан, состояние:', eventSource.readyState);
+        console.log('🔍 EventSource.readyState: 0=CONNECTING, 1=OPEN, 2=CLOSED');
+    } catch (e) {
+        console.error('❌ Ошибка создания EventSource:', e);
+        showError('Ошибка создания SSE соединения: ' + e.message);
+        return;
+    }
+    
+    // Обработка открытия соединения
+    eventSource.onopen = function(event) {
+        console.log('✅ SSE соединение открыто!', event);
+        console.log('🔍 EventSource.readyState после открытия:', eventSource.readyState);
+        updateProgress(1, 'Соединение установлено, ожидание начала развертывания...');
+        // Показываем кнопку остановки
+        document.getElementById('stopDeploymentBtn').style.display = 'block';
+    };
+    
+    // Обработка событий SSE
+    eventSource.onmessage = function(event) {
+        console.log('📨 Получено SSE сообщение:', event.data);
+        try {
+            const data = JSON.parse(event.data);
+            
+            // Обработка heartbeat (игнорируем, но логируем)
+            if (data.heartbeat) {
+                console.log('💓 Heartbeat получен');
+                return;
+            }
+            
+            // КРИТИЧНО: Обработка сигнала очистки сессии
+            if (data.clear_session) {
+                console.log('🧹 Получен сигнал очистки сессии, вызываем /api/deployment/clear');
+                // Вызываем API для принудительной очистки сессии
+                fetch('/api/deployment/clear', {method: 'POST'})
+                    .then(response => response.json())
+                    .then(result => {
+                        console.log('✅ Сессия очищена:', result);
+                        // Затем проверяем статус
+                        return fetch('/api/deployment/status');
+                    })
+                    .then(response => response.json())
+                    .then(status => {
+                        console.log('✅ Статус после очистки:', status);
+                    })
+                    .catch(error => console.error('❌ Ошибка очистки сессии:', error));
+            }
+            
+            // Обновляем общий прогресс
+            if (data.progress !== undefined) {
+                updateProgress(data.progress, data.status || '');
+            }
+            
+            // Обновляем статус узла
+            if (data.current_node) {
+                const status = data.node_status || 'deploying';
+                updateNodeStatus(data.current_node, status, data.status);
+                
+                if (status === 'success' || status === 'completed') {
+                    if (!nodeStatuses[data.current_node] || nodeStatuses[data.current_node] !== 'success') {
+                        completedNodes++;
+                    }
+                    nodeStatuses[data.current_node] = 'success';
+                } else if (status === 'error') {
+                    nodeStatuses[data.current_node] = 'error';
+                } else {
+                    nodeStatuses[data.current_node] = status;
+                }
+                
+                // Отправляем данные в компонент уведомлений в header
+                if (typeof window.updateDeploymentStatus === 'function') {
+                    window.updateDeploymentStatus(data);
+                }
+            }
+            
+            // Обновляем общее количество узлов
+            if (data.total_nodes) {
+                totalNodes = data.total_nodes;
+            }
+            
+            // Обработка ошибок
+            if (data.error) {
+                showError(data.error);
+                eventSource.close();
+            }
+            
+            // Обработка завершения
+            if (data.complete) {
+                console.log('✅ Развертывание завершено:', data);
+                
+                // КРИТИЧНО: Закрываем SSE соединение сразу после получения complete
+                if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
+                eventSource.close();
+                    console.log('🔒 SSE соединение закрыто');
+                }
+                
+                // Скрываем кнопку остановки
+                const stopBtn = document.getElementById('stopDeploymentBtn');
+                if (stopBtn) {
+                    stopBtn.style.display = 'none';
+                }
+                
+                // Обновляем прогресс до 100%
+                updateProgress(100, data.status || 'Развертывание завершено');
+                
+                if (data.success) {
+                    const deployedCount = data.deployed_count || completedNodes;
+                    const totalCount = data.total_count || totalNodes;
+                    showSuccess(`Успешно развернуто ${deployedCount} из ${totalCount} узлов`);
+                } else {
+                    showError(data.error || 'Развертывание завершилось с ошибками');
+                }
+                
+                // КРИТИЧНО: Отправляем финальный статус в компонент уведомлений с явным указанием завершения
+                if (typeof window.updateDeploymentStatus === 'function') {
+                    window.updateDeploymentStatus({
+                        ...data,
+                        complete: true,
+                        active: false
+                    });
+                }
+                
+                // КРИТИЧНО: Принудительно очищаем сессию после завершения развертывания
+                setTimeout(function() {
+                    // Сначала проверяем статус
+                    fetch('/api/deployment/status')
+                        .then(response => response.json())
+                        .then(statusData => {
+                            console.log('📊 Финальный статус развертывания:', statusData);
+                            if (statusData.active) {
+                                console.warn('⚠️ Развертывание все еще активно, принудительно очищаем');
+                                // Принудительно очищаем сессию
+                                return fetch('/api/deployment/clear', {method: 'POST'});
+                            } else {
+                                console.log('✅ Развертывание завершено, сессия очищена');
+                            }
+                        })
+                        .then(response => {
+                            if (response) {
+                                return response.json();
+                            }
+                        })
+                        .then(result => {
+                            if (result) {
+                                console.log('✅ Сессия принудительно очищена:', result);
+                            }
+                            // Повторно проверяем статус после очистки
+                            return fetch('/api/deployment/status');
+                        })
+                        .then(response => response.json())
+                        .then(finalStatus => {
+                            console.log('✅ Финальный статус после очистки:', finalStatus);
+                            // Обновляем глобальный статус
+                            if (window.updateDeploymentStatus) {
+                                window.updateDeploymentStatus({
+                                    complete: true,
+                                    active: false,
+                                    success: data.success
+                                });
+                            }
+                        })
+                        .catch(err => {
+                            console.error('Ошибка проверки/очистки финального статуса:', err);
+                        });
+                }, 1000);
+                
+                // КРИТИЧНО: Дополнительная очистка через 3 секунды на случай если первая не сработала
+                setTimeout(function() {
+                    fetch('/api/deployment/status')
+                        .then(response => response.json())
+                        .then(statusData => {
+                            if (statusData.active) {
+                                console.warn('⚠️ Развертывание все еще активно после 3 сек, принудительно очищаем');
+                                return fetch('/api/deployment/clear', {method: 'POST'});
+                            }
+                        })
+                        .catch(err => console.error('Ошибка дополнительной очистки:', err));
+                }, 3000);
+            }
+            
+        } catch (e) {
+            console.error('Ошибка парсинга SSE данных:', e, 'Данные:', event.data);
+        }
+    };
+    
+    eventSource.onerror = function(event) {
+        console.error('❌ Ошибка SSE соединения:', event);
+        console.error('Состояние EventSource:', eventSource.readyState);
+        // readyState: 0 = CONNECTING, 1 = OPEN, 2 = CLOSED
+        if (eventSource.readyState === EventSource.CLOSED) {
+            showError('Соединение с сервером закрыто. Проверьте консоль сервера на наличие ошибок.');
+        } else if (eventSource.readyState === EventSource.CONNECTING) {
+            console.log('⏳ Соединение все еще устанавливается...');
+        } else {
+            showError('Ошибка соединения с сервером. Проверьте логи сервера.');
+        }
+        // Не закрываем сразу при ошибке - возможно, это временная проблема
+    };
+});
+
+// Закрываем соединение при уходе со страницы
+window.addEventListener('beforeunload', function() {
+    if (eventSource) {
+        eventSource.close();
+    }
+});
+
+function stopDeployment() {
+    if (!confirm('Вы уверены, что хотите остановить развертывание? Текущий узел будет завершен, остальные узлы не будут развернуты.')) {
+        return;
+    }
+    
+    const btn = document.getElementById('stopDeploymentBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split me-2"></i>Остановка...';
+    
+    fetch('/api/deployment/stop', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            updateProgress(0, 'Остановка развертывания...');
+            showError('Развертывание остановлено пользователем');
+            // Отправляем в компонент уведомлений
+            if (typeof window.updateDeploymentStatus === 'function') {
+                window.updateDeploymentStatus({complete: true, success: false, error: 'Развертывание остановлено пользователем'});
+            }
+            // Закрываем SSE соединение
+            if (eventSource) {
+                eventSource.close();
+            }
+            btn.style.display = 'none';
+        } else {
+            alert('Ошибка при остановке развертывания: ' + (data.error || 'Неизвестная ошибка'));
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-stop-circle me-2"></i>Остановить развертывание';
+        }
+    })
+    .catch(error => {
+        alert('Ошибка при остановке развертывания: ' + error.message);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-stop-circle me-2"></i>Остановить развертывание';
+    });
+}
+</script>
+
+<style>
+.node-status-item {
+    background: var(--bg-card);
+    transition: all 0.3s ease;
+}
+
+.node-status-item:hover {
+    background: var(--bg-hover);
+    transform: translateX(5px);
+}
+</style>
+{% endblock %}
+

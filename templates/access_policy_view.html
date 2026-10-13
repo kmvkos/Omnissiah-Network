@@ -1,0 +1,249 @@
+{% extends 'layout.html' %}
+{% block title %}Просмотр конфигурации правила{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-file-earmark-code me-2"></i>Конфигурация правила #{{ rule.id }}</h2>
+        <div>
+            <a href="{{ url_for('access_policy') }}" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left me-2"></i>Назад
+            </a>
+            {% if rule.status == 'saved' %}
+            <button type="button" class="btn btn-gold" onclick="applyRule({{ rule.id }})">
+                <i class="bi bi-play-circle me-2"></i>Применить конфигурацию
+            </button>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Информация о правиле -->
+    <div class="premium-card p-4 mb-4">
+        <h5 class="mb-3"><i class="bi bi-info-circle me-2"></i>Информация о правиле</h5>
+        <div class="row">
+            <div class="col-md-6">
+                <table class="table table-dark table-sm">
+                    <tr>
+                        <td><strong>Источник:</strong></td>
+                        <td><code>{{ rule.get_source_display() }}</code></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Назначение:</strong></td>
+                        <td><code>{{ rule.get_destination_display() }}</code></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Протокол:</strong></td>
+                        <td>{{ rule.protocol }}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Порты/Сервис:</strong></td>
+                        <td>{{ rule.ports or rule.service or 'Все' }}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Статус:</strong></td>
+                        <td>
+                            {% if rule.status == 'pending' %}
+                                <span class="badge bg-warning">Ожидает</span>
+                            {% elif rule.status == 'saved' %}
+                                <span class="badge bg-info">Сохранено</span>
+                            {% elif rule.status == 'applied' %}
+                                <span class="badge bg-success">Применено</span>
+                            {% elif rule.status == 'failed' %}
+                                <span class="badge bg-danger">Ошибка</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                </table>
+            </div>
+            <div class="col-md-6">
+                <table class="table table-dark table-sm">
+                    <tr>
+                        <td><strong>Создано:</strong></td>
+                        <td>{{ rule.created_at.strftime('%Y-%m-%d %H:%M:%S') if rule.created_at else 'N/A' }}</td>
+                    </tr>
+                    {% if rule.applied_at %}
+                    <tr>
+                        <td><strong>Применено:</strong></td>
+                        <td>{{ rule.applied_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                    </tr>
+                    {% endif %}
+                    {% if rule.applied_on_nodes %}
+                    <tr>
+                        <td><strong>Применено на узлах:</strong></td>
+                        <td>
+                            {% if rule.applied_on_nodes is string %}
+                                {% set applied_nodes = rule.applied_on_nodes|from_json %}
+                            {% else %}
+                                {% set applied_nodes = rule.applied_on_nodes %}
+                            {% endif %}
+                            {% for node in applied_nodes %}
+                                <span class="badge bg-secondary">{{ node.node_name if node.node_name else node }}</span>
+                            {% endfor %}
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% if rule.description %}
+                    <tr>
+                        <td><strong>Описание:</strong></td>
+                        <td>{{ rule.description }}</td>
+                    </tr>
+                    {% endif %}
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Узлы назначения -->
+    {% if config_data.target_nodes %}
+    <div class="premium-card p-4 mb-4">
+        <h5 class="mb-3"><i class="bi bi-diagram-3 me-2"></i>Целевые узлы</h5>
+        <div class="row">
+            {% for node in config_data.target_nodes %}
+            <div class="col-md-4 mb-2">
+                <div class="card bg-dark border-accent">
+                    <div class="card-body">
+                        <h6 class="card-title">{{ node.name }}</h6>
+                        <span class="badge bg-secondary">{{ node.role }}</span>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- iptables правила -->
+    {% if config_data.iptables_rules %}
+    <div class="premium-card p-4 mb-4">
+        <h5 class="mb-3">
+            <i class="bi bi-shield-lock me-2"></i>
+            Правила iptables ({{ config_data.iptables_rules|length }})
+        </h5>
+        <div class="table-responsive">
+            <table class="table table-dark table-sm">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Команда</th>
+                        <th>Предварительный просмотр</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for rule_cmd in config_data.iptables_rules %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td><code>{{ rule_cmd|join(' ') }}</code></td>
+                        <td>
+                            <small class="text-muted">
+                                {% if '-A FORWARD' in rule_cmd|join(' ') %}
+                                    Пересылка трафика
+                                {% elif '-A INPUT' in rule_cmd|join(' ') %}
+                                    Входящий трафик
+                                {% elif '-A OUTPUT' in rule_cmd|join(' ') %}
+                                    Исходящий трафик
+                                {% endif %}
+                                {% if '-j ACCEPT' in rule_cmd|join(' ') %}
+                                    <span class="text-success">→ Разрешить</span>
+                                {% elif '-j DROP' in rule_cmd|join(' ') %}
+                                    <span class="text-danger">→ Запретить</span>
+                                {% elif '-j REJECT' in rule_cmd|join(' ') %}
+                                    <span class="text-warning">→ Отклонить</span>
+                                {% endif %}
+                            </small>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Маршруты -->
+    {% if config_data.routes %}
+    <div class="premium-card p-4 mb-4">
+        <h5 class="mb-3">
+            <i class="bi bi-signpost-2 me-2"></i>
+            Маршруты ({{ config_data.routes|length }})
+        </h5>
+        <div class="table-responsive">
+            <table class="table table-dark table-sm">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Сеть</th>
+                        <th>Шлюз</th>
+                        <th>Интерфейс</th>
+                        <th>Команда</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for route in config_data.routes %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td><code>{{ route.network }}</code></td>
+                        <td><code>{{ route.gateway or 'N/A' }}</code></td>
+                        <td><code>{{ route.interface }}</code></td>
+                        <td>
+                            <code>
+                                ip route add {{ route.network }}
+                                {% if route.gateway %}via {{ route.gateway }}{% endif %}
+                                dev {{ route.interface }}
+                            </code>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if config_data.error %}
+    <div class="premium-card p-4 mb-4">
+        <div class="alert alert-warning">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            <strong>Предупреждение:</strong> {{ config_data.error }}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Полная конфигурация (JSON) -->
+    <div class="premium-card p-4">
+        <h5 class="mb-3">
+            <i class="bi bi-code-square me-2"></i>
+            Полная конфигурация (JSON)
+        </h5>
+        <pre class="bg-dark p-3 rounded"><code>{{ config_data|tojson(indent=2) }}</code></pre>
+    </div>
+</div>
+
+<script>
+function applyRule(ruleId) {
+    if (!confirm('Применить эту конфигурацию на всех целевых узлах?')) {
+        return;
+    }
+    
+    fetch(`/api/access_policy/rules/${ruleId}/apply`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('✅ ' + data.message);
+            window.location.reload();
+        } else {
+            alert('❌ Ошибка: ' + data.error);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('❌ Ошибка при применении правила');
+    });
+}
+</script>
+{% endblock %}
+

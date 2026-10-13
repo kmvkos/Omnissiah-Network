@@ -1,0 +1,527 @@
+{% extends "layout.html" %}
+
+{% block title %}Мастер развёртывания WARP{% endblock %}
+{% block header_title %}
+    <i class="bi bi-diagram-3 me-2"></i>Мастер развёртывания WARP
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Индикатор прогресса -->
+    <div class="card-modern mb-4">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="mb-0">Этап {{ step }} из {{ total_steps }}</h5>
+                <div class="progress" style="width: 300px; height: 8px;">
+                    <div class="progress-bar" role="progressbar" 
+                         style="width: {{ (step / total_steps * 100)|round }}%"
+                         aria-valuenow="{{ step }}" 
+                         aria-valuemin="1" 
+                         aria-valuemax="{{ total_steps }}">
+                    </div>
+                </div>
+            </div>
+            <div class="d-flex gap-2">
+                <div class="badge {% if step >= 1 %}badge-success-modern{% else %}badge-secondary{% endif %}">
+                    1. Узлы
+                </div>
+                <div class="badge {% if step >= 2 %}badge-success-modern{% else %}badge-secondary{% endif %}">
+                    2. Родители
+                </div>
+                <div class="badge {% if step >= 3 %}badge-success-modern{% else %}badge-secondary{% endif %}">
+                    3. Связи
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% if step == 1 %}
+    <!-- Этап 1: Добавление узлов -->
+    <div class="card-modern mb-4">
+        <div class="card-header-modern">
+            <h5 class="card-title-modern">
+                <i class="bi bi-server me-2"></i>Этап 1: Указание узлов
+            </h5>
+        </div>
+        <div class="card-body">
+            <p class="text-muted mb-4">
+                Укажите IP адреса узлов, их роли и данные для SSH доступа.
+            </p>
+
+            <!-- Форма добавления узла -->
+            <form method="POST" action="{{ url_for('network_deployment_wizard', step=1) }}" class="mb-4" id="addNodeForm">
+                <input type="hidden" name="step" value="1">
+                
+                <!-- Чекбокс единых аутентификационных данных -->
+                <div class="mb-3">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="use_unified_auth" name="use_unified_auth" 
+                               onchange="toggleUnifiedAuth()" {% if use_unified_auth %}checked{% endif %}>
+                        <label class="form-check-label" for="use_unified_auth">
+                            Использовать единые аутентификационные данные
+                            <small class="text-muted d-block">Один и тот же логин и пароль для всех узлов</small>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="row g-3">
+                    <div class="col-md-2">
+                        <label class="form-label-modern">Имя узла *</label>
+                        <input type="text" name="name" id="node_name" class="form-control-modern" 
+                               placeholder="magos01" required>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label-modern">IP адрес *</label>
+                        <input type="text" name="ip" id="node_ip" class="form-control-modern" 
+                               placeholder="192.168.1.10" required>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label-modern">Роль *</label>
+                        <select name="role" id="node_role" class="form-select-modern" required>
+                            <option value="">Выберите роль</option>
+                            <option value="Magos">Magos</option>
+                            <option value="Cognitor">Cognitor</option>
+                        </select>
+                        <small class="text-muted">Omnissiah уже существует</small>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label-modern">SSH пользователь *</label>
+                        <input type="text" name="ssh_user" id="node_ssh_user" class="form-control-modern unified-auth-field" 
+                               placeholder="root" required>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label-modern">SSH пароль</label>
+                        <input type="password" name="ssh_password" id="node_ssh_password" class="form-control-modern unified-auth-field" 
+                               placeholder="или укажите ключ">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label-modern">SSH ключ (путь)</label>
+                        <input type="text" name="ssh_key_path" id="node_ssh_key_path" class="form-control-modern unified-auth-field" 
+                               placeholder="/path/to/key">
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <button type="submit" class="btn btn-primary-modern">
+                        <i class="bi bi-plus-circle me-2"></i>Добавить узел
+                    </button>
+                </div>
+            </form>
+
+            <!-- Список добавленных узлов -->
+            {% if nodes %}
+            <div class="table-responsive">
+                <table class="table table-modern">
+                    <thead>
+                        <tr>
+                            <th>Имя</th>
+                            <th>IP адрес</th>
+                            <th>Роль</th>
+                            <th>SSH пользователь</th>
+                            <th>SSH аутентификация</th>
+                            <th>Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for node in nodes %}
+                        <tr>
+                            <td><strong>{{ node.name or node.ip }}</strong></td>
+                            <td><code>{{ node.ip }}</code></td>
+                            <td>
+                                <span class="badge {% if node.role == 'Omnissiah' %}badge-info-modern{% elif node.role == 'Magos' %}badge-primary{% else %}badge-secondary{% endif %}">
+                                    {{ node.role }}
+                                </span>
+                            </td>
+                            <td>{{ node.ssh_user }}</td>
+                            <td>
+                                {% if node.ssh_password %}
+                                    <span class="badge badge-info-modern">Пароль</span>
+                                {% elif node.ssh_key_path %}
+                                    <span class="badge badge-info-modern">Ключ: {{ node.ssh_key_path }}</span>
+                                {% else %}
+                                    <span class="badge badge-danger-modern">Не указано</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <form method="POST" action="{{ url_for('network_deployment_wizard', step=1) }}" style="display: inline;">
+                                    <input type="hidden" name="remove_node" value="{{ node.id }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger-modern">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            {% endif %}
+
+            <!-- Кнопка "Далее" всегда видна -->
+            <div class="mt-4 d-flex justify-content-between align-items-center">
+                <div></div>
+                <a href="{{ url_for('network_deployment_wizard', step=2) }}" 
+                   class="btn btn-primary-modern {% if not nodes %}disabled{% endif %}"
+                   {% if not nodes %}onclick="return false; alert('Добавьте хотя бы один узел для продолжения');"{% endif %}>
+                    Далее: Настройка связей родитель-потомок <i class="bi bi-arrow-right ms-2"></i>
+                </a>
+            </div>
+
+            {% if not nodes %}
+            <div class="text-center py-5 text-muted">
+                <i class="bi bi-inbox" style="font-size: 3rem;"></i>
+                <p class="mt-3">Добавьте первый узел для начала настройки</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if step == 2 %}
+    <!-- Этап 2: Настройка связей родитель-потомок -->
+    <div class="card-modern mb-4">
+        <div class="card-header-modern">
+            <h5 class="card-title-modern">
+                <i class="bi bi-diagram-2 me-2"></i>Этап 2: Настройка связей родитель-потомок
+            </h5>
+        </div>
+        <div class="card-body">
+            <p class="text-muted mb-4">
+                Укажите для каждого узла его родителя. Magos всегда имеют родителем Omnissiah (автоматически).
+                Cognitor могут иметь родителем Magos или Omnissiah.
+            </p>
+
+            <form method="POST">
+                <div class="table-responsive">
+                    <table class="table table-modern">
+                        <thead>
+                            <tr>
+                                <th>Узел</th>
+                                <th>Роль</th>
+                                <th>Родитель</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for node in nodes %}
+                            <tr>
+                                <td>
+                                    <strong>{{ node.name or node.ip }}</strong><br>
+                                    <code class="text-muted">{{ node.ip }}</code>
+                                </td>
+                                <td>
+                                    <span class="badge {% if node.role == 'Omnissiah' %}badge-info-modern{% elif node.role == 'Magos' %}badge-primary{% else %}badge-secondary{% endif %}">
+                                        {{ node.role }}
+                                    </span>
+                                </td>
+                                <td>
+                                    {% if node.role == 'Magos' %}
+                                        {% if omnissiah %}
+                                            <span class="text-muted">
+                                                <i class="bi bi-link-45deg me-1"></i>{{ omnissiah.name }} (Omnissiah)
+                                            </span>
+                                            <input type="hidden" name="parent_{{ node.id }}" value="omnissiah">
+                                        {% else %}
+                                            <span class="text-danger">⚠️ Omnissiah не найден в системе</span>
+                                        {% endif %}
+                                    {% else %}
+                                        {# Cognitor - может выбрать Magos или Omnissiah #}
+                                        <select name="parent_{{ node.id }}" class="form-select-modern">
+                                            <option value="none">Нет родителя</option>
+                                            {% if omnissiah %}
+                                                <option value="omnissiah" {% if parent_relations.get(node.id) == 'omnissiah' %}selected{% endif %}>
+                                                    {{ omnissiah.name }} (Omnissiah)
+                                                </option>
+                                            {% endif %}
+                                            {% for potential_parent in nodes %}
+                                                {% if potential_parent.id != node.id and potential_parent.role == 'Magos' %}
+                                                    <option value="{{ potential_parent.id }}" 
+                                                            {% if parent_relations.get(node.id) == potential_parent.id %}selected{% endif %}>
+                                                        {{ potential_parent.name or potential_parent.ip }} ({{ potential_parent.role }})
+                                                    </option>
+                                                {% endif %}
+                                            {% endfor %}
+                                        </select>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="mt-4 d-flex justify-content-between">
+                    <a href="{{ url_for('network_deployment_wizard', step=1) }}" class="btn btn-outline-modern">
+                        <i class="bi bi-arrow-left me-2"></i>Назад
+                    </a>
+                    <button type="submit" class="btn btn-primary-modern">
+                        Далее: Настройка прямых связей <i class="bi bi-arrow-right ms-2"></i>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if step == 3 %}
+    <!-- Этап 3: Настройка связей прямого взаимодействия -->
+    <div class="card-modern mb-4">
+        <div class="card-header-modern">
+            <h5 class="card-title-modern">
+                <i class="bi bi-link-45deg me-2"></i>Этап 3: Настройка связей прямого взаимодействия
+            </h5>
+        </div>
+        <div class="card-body">
+            <p class="text-muted mb-4">
+                Выберите узлы, которые могут взаимодействовать напрямую без прохождения через Omnissiah.
+                Обратите внимание: Cognitor могут общаться друг с другом напрямую только если это явно разрешено в настройках узла.
+            </p>
+
+            <form method="POST" action="{{ url_for('network_deployment_wizard', step=3) }}" id="connectionsForm">
+                <div class="table-responsive">
+                    <table class="table table-modern">
+                        <thead>
+                            <tr>
+                                <th>Узел</th>
+                                <th>Роль</th>
+                                <th>Прямые связи</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for node in nodes %}
+                            <tr>
+                                <td>
+                                    <strong>{{ node.name or node.ip }}</strong><br>
+                                    <code class="text-muted">{{ node.ip }}</code>
+                                </td>
+                                <td>
+                                    <span class="badge {% if node.role == 'Omnissiah' %}badge-info-modern{% elif node.role == 'Magos' %}badge-primary{% else %}badge-secondary{% endif %}">
+                                        {{ node.role }}
+                                    </span>
+                                </td>
+                                <td>
+                                    <div class="connections-container" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; background: var(--bg-secondary);">
+                                        {# Omnissiah для Magos (по умолчанию) #}
+                                        {% if node.role == 'Magos' and omnissiah %}
+                                            <div class="form-check mb-2">
+                                                <input class="form-check-input" type="checkbox" 
+                                                       id="conn_{{ node.id }}_omnissiah" 
+                                                       name="connections_{{ node.id }}" 
+                                                       value="omnissiah" 
+                                                       checked 
+                                                       disabled
+                                                       style="cursor: not-allowed;">
+                                                <label class="form-check-label" for="conn_{{ node.id }}_omnissiah" 
+                                                       style="color: var(--text-muted); cursor: not-allowed;">
+                                                    <strong>{{ omnissiah.name }}</strong> (Omnissiah) 
+                                                    <span class="badge badge-info-modern ms-1">по умолчанию</span>
+                                                </label>
+                                                <input type="hidden" name="connections_{{ node.id }}" value="omnissiah">
+                                            </div>
+                                        {% endif %}
+                                        
+                                        {# Omnissiah для Cognitor (если родитель - Omnissiah) #}
+                                        {% if node.role == 'Cognitor' and omnissiah %}
+                                            {% set parent_id = parent_relations.get(node.id) %}
+                                            {% if parent_id == 'omnissiah' %}
+                                                <div class="form-check mb-2">
+                                                    <input class="form-check-input" type="checkbox" 
+                                                           id="conn_{{ node.id }}_omnissiah" 
+                                                           name="connections_{{ node.id }}" 
+                                                           value="omnissiah" 
+                                                           checked 
+                                                           disabled
+                                                           style="cursor: not-allowed;">
+                                                    <label class="form-check-label" for="conn_{{ node.id }}_omnissiah" 
+                                                           style="color: var(--text-muted); cursor: not-allowed;">
+                                                        <strong>{{ omnissiah.name }}</strong> (Omnissiah) 
+                                                        <span class="badge badge-info-modern ms-1">родитель</span>
+                                                    </label>
+                                                    <input type="hidden" name="connections_{{ node.id }}" value="omnissiah">
+                                                </div>
+                                            {% endif %}
+                                        {% endif %}
+                                        
+                                        {# Связи с другими узлами #}
+                                        {% for potential_connection in nodes %}
+                                            {% if potential_connection.id != node.id %}
+                                                {% set can_connect = true %}
+                                                {% if node.role == 'Cognitor' and potential_connection.role == 'Cognitor' %}
+                                                    {% set can_connect = false %}
+                                                {% endif %}
+                                                
+                                                {% if can_connect %}
+                                                    {% set is_connected = false %}
+                                                    {% for conn in direct_connections %}
+                                                        {% if (conn[0] == node.id and conn[1] == potential_connection.id) or 
+                                                              (conn[1] == node.id and conn[0] == potential_connection.id) %}
+                                                            {% set is_connected = true %}
+                                                        {% endif %}
+                                                    {% endfor %}
+                                                    
+                                                    {# Для Cognitor: связь с родителем (если родитель - Magos) выбирается по умолчанию #}
+                                                    {% if node.role == 'Cognitor' and potential_connection.role == 'Magos' %}
+                                                        {% set parent_id = parent_relations.get(node.id) %}
+                                                        {% if parent_id == potential_connection.id %}
+                                                            {% set is_connected = true %}
+                                                        {% endif %}
+                                                    {% endif %}
+                                                    
+                                                    <div class="form-check mb-2">
+                                                        <input class="form-check-input connection-checkbox" 
+                                                               type="checkbox" 
+                                                               id="conn_{{ node.id }}_{{ potential_connection.id }}" 
+                                                               name="connections_{{ node.id }}" 
+                                                               value="{{ potential_connection.id }}" 
+                                                               {% if is_connected %}checked{% endif %}>
+                                                        <label class="form-check-label" for="conn_{{ node.id }}_{{ potential_connection.id }}">
+                                                            <strong>{{ potential_connection.name or potential_connection.ip }}</strong> 
+                                                            <span class="badge {% if potential_connection.role == 'Magos' %}badge-primary{% else %}badge-secondary{% endif %}">
+                                                                {{ potential_connection.role }}
+                                                            </span>
+                                                        </label>
+                                                    </div>
+                                                {% endif %}
+                                            {% endif %}
+                                        {% endfor %}
+                                    </div>
+                                    
+                                    {% if node.role == 'Magos' %}
+                                        <small class="text-info d-block mt-2">
+                                            <i class="bi bi-info-circle me-1"></i>
+                                            По умолчанию: связь с Omnissiah
+                                        </small>
+                                    {% elif node.role == 'Cognitor' %}
+                                        <small class="text-info d-block mt-2">
+                                            <i class="bi bi-info-circle me-1"></i>
+                                            По умолчанию: связь с родителем
+                                        </small>
+                                    {% endif %}
+                                    
+                                    <!-- Кнопка удаления всех выбранных связей -->
+                                    <button type="button" class="btn btn-sm btn-outline-danger-modern mt-2" 
+                                            onclick="clearConnections({{ node.id }})">
+                                        <i class="bi bi-x-circle me-1"></i>Очистить все связи
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="mt-4 d-flex justify-content-between">
+                    <a href="{{ url_for('network_deployment_wizard', step=2) }}" class="btn btn-outline-modern">
+                        <i class="bi bi-arrow-left me-2"></i>Назад
+                    </a>
+                    <button type="submit" class="btn btn-primary-modern">
+                        <i class="bi bi-check-circle me-2"></i>Завершить настройку
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+// Обработка удаления узла на этапе 1
+document.querySelectorAll('form[action*="remove_node"]').forEach(form => {
+    form.addEventListener('submit', function(e) {
+        if (!confirm('Удалить этот узел?')) {
+            e.preventDefault();
+        }
+    });
+});
+
+// Функция для переключения единых аутентификационных данных
+function toggleUnifiedAuth() {
+    const checkbox = document.getElementById('use_unified_auth');
+    const unifiedFields = document.querySelectorAll('.unified-auth-field');
+    const isChecked = checkbox.checked;
+    
+    unifiedFields.forEach(function(field) {
+        if (isChecked) {
+            // Если чекбокс включен, делаем поля read-only и заполняем из первого узла
+            field.readOnly = true;
+            field.style.backgroundColor = 'var(--bg-tertiary)';
+        } else {
+            // Если чекбокс выключен, делаем поля редактируемыми
+            field.readOnly = false;
+            field.style.backgroundColor = '';
+        }
+    });
+    
+    // Если чекбокс включен и есть уже добавленные узлы, заполняем поля из первого узла
+    if (isChecked) {
+        // Значения будут заполнены при первом добавлении узла
+        // При добавлении последующих узлов они будут автоматически заполняться
+    }
+}
+
+// Функция очистки связей для узла
+function clearConnections(nodeId) {
+    if (confirm('Удалить все пользовательские связи для этого узла? (Связи по умолчанию с Omnissiah останутся)')) {
+        // Находим все чекбоксы для этого узла
+        const checkboxes = document.querySelectorAll(`input[name="connections_${nodeId}"].connection-checkbox`);
+        checkboxes.forEach(checkbox => {
+            checkbox.checked = false;
+        });
+    }
+}
+
+// Добавляем обработчик для удобного удаления связи по клавише Del
+document.addEventListener('DOMContentLoaded', function() {
+    document.addEventListener('keydown', function(e) {
+        // Если нажата клавиша Delete и фокус на чекбоксе связи
+        if (e.key === 'Delete' && e.target.classList.contains('connection-checkbox')) {
+            e.target.checked = false;
+            e.preventDefault();
+        }
+    });
+});
+
+// Очистка формы после успешного добавления узла
+document.addEventListener('DOMContentLoaded', function() {
+    const addNodeForm = document.getElementById('addNodeForm');
+    if (addNodeForm) {
+        // Проверяем, есть ли flash сообщение об успешном добавлении
+        const flashMessages = document.querySelectorAll('.alert-success');
+        flashMessages.forEach(function(msg) {
+            if (msg.textContent.includes('добавлен')) {
+                const useUnified = document.getElementById('use_unified_auth').checked;
+                
+                // Очищаем форму
+                document.getElementById('node_name').value = '';
+                document.getElementById('node_ip').value = '';
+                document.getElementById('node_role').value = '';
+                
+                // Если единые данные не используются, очищаем SSH поля
+                if (!useUnified) {
+                    document.getElementById('node_ssh_user').value = '';
+                    document.getElementById('node_ssh_password').value = '';
+                    document.getElementById('node_ssh_key_path').value = '';
+                }
+                // Если единые данные используются, поля остаются заполненными (read-only)
+            }
+        });
+        
+        // Если единые данные включены и есть добавленные узлы, заполняем поля из первого узла
+        const useUnifiedCheckbox = document.getElementById('use_unified_auth');
+        if (useUnifiedCheckbox && useUnifiedCheckbox.checked) {
+            toggleUnifiedAuth(); // Применяем стили read-only
+            
+            // Если есть уже добавленные узлы, заполняем поля из первого узла
+            {% if nodes and nodes|length > 0 %}
+            const firstNode = {{ nodes[0] | tojson }};
+            if (firstNode) {
+                document.getElementById('node_ssh_user').value = firstNode.ssh_user || '';
+                document.getElementById('node_ssh_password').value = firstNode.ssh_password || '';
+                document.getElementById('node_ssh_key_path').value = firstNode.ssh_key_path || '';
+            }
+            {% endif %}
+        }
+    }
+});
+</script>
+{% endblock %}
+

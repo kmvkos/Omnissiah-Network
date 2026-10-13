@@ -1,0 +1,942 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="container d-flex justify-content-center align-items-center py-5">
+    <div class="col-lg-8">
+        <div class="card border border-secondary bg-dark text-light shadow-lg" style="border-radius: 0.75rem; background-color: rgba(0,0,0,0.7); backdrop-filter: blur(8px);">
+            <div class="card-header border-bottom text-gold bg-transparent">
+                <h4 class="mb-0 d-flex align-items-center gap-2">
+                    <i class="bi bi-sliders2 text-gold"></i>
+                    {% if has_omnissiah_config %}
+                        Добавление нового объекта
+                    {% else %}
+                        Создание главной конфигурации
+                    {% endif %}
+                </h4>
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    {{ form.hidden_tag() }}
+
+                    <div class="mb-3">
+                        {{ form.name.label(class="form-label text-gold") }}
+                        {{ form.name(class="form-control bg-dark border-secondary text-light") }}
+                        {% for error in form.name.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+
+                    {% if has_omnissiah_config %}
+                        <div class="mb-3">
+                            {{ form.role.label(class="form-label text-gold") }}
+                            {{ form.role(class="form-select bg-dark text-light border-secondary") }}
+                        </div>
+
+                        <div class="mb-3">
+                            {{ form.parent_id.label(class="form-label text-gold") }}
+                            {{ form.parent_id(class="form-select bg-dark text-light border-secondary") }}
+                            <small class="text-muted">Выберите родительский узел</small>
+                        </div>
+                    {% else %}
+                        <input type="hidden" name="role" value="Omnissiah">
+                        
+                        <div class="form-check mb-3">
+                            {{ form.configure_wireguard(class="form-check-input", id="configure_wireguard") }}
+                            {{ form.configure_wireguard.label(class="form-check-label text-light") }}
+                        </div>
+
+                        <div id="wireguard_settings" style="display: none;">
+                            <div class="mb-3">
+                                {{ form.ip_pool.label(class="form-label text-gold") }}
+                                {{ form.ip_pool(class="form-control bg-dark border-secondary text-light", id="ip_pool_field", placeholder="10.0.0.1/24") }}
+                                <small class="text-muted">Укажите сеть для сервера (например: 10.0.0.1/24)</small>
+                                {% for error in form.ip_pool.errors %}
+                                    <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                            </div>
+
+                            <div class="mb-3">
+                                {{ form.endpoint.label(class="form-label text-gold") }}
+                                {{ form.endpoint(class="form-control bg-dark border-secondary text-light", placeholder="example.com") }}
+                                {% for error in form.endpoint.errors %}
+                                    <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                            </div>
+
+                            <div class="mb-3">
+                                {{ form.port.label(class="form-label text-gold") }}
+                                {{ form.port(class="form-control bg-dark border-secondary text-light") }}
+                                {% for error in form.port.errors %}
+                                    <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                            </div>
+
+                            <div class="mb-3">
+                                {{ form.dns.label(class="form-label text-gold") }}
+                                {{ form.dns(class="form-control bg-dark border-secondary text-light") }}
+                            </div>
+
+                            <div class="mb-3">
+                                {{ form.mtu.label(class="form-label text-gold") }}
+                                {{ form.mtu(class="form-control bg-dark border-secondary text-light") }}
+                            </div>
+
+                            <div class="form-check mb-3">
+                                {{ form.use_preshared_key(class="form-check-input") }}
+                                {{ form.use_preshared_key.label(class="form-check-label text-light") }}
+                            </div>
+                            
+                            <div class="mb-3">
+                                {{ form.admin_ip.label(class="form-label text-gold") }}
+                                {{ form.admin_ip(class="form-control bg-dark border-secondary text-light", placeholder="10.11.11.100") }}
+                                <small class="text-muted">IP адрес узла администратора с которого разрешен весь трафик</small>
+                                {% for error in form.admin_ip.errors %}
+                                    <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                        </div>
+
+                        <div class="form-check mb-3">
+                            {{ form.configure_nginx(class="form-check-input", id="configure_nginx") }}
+                            {{ form.configure_nginx.label(class="form-check-label text-light") }}
+                        </div>
+
+                        <div id="nginx_settings" style="display: none;">
+                            <div class="mb-3">
+                                {{ form.nginx_domain.label(class="form-label text-gold") }}
+                                {{ form.nginx_domain(class="form-control bg-dark border-secondary text-light", placeholder="example.com или IP адрес") }}
+                                <small class="text-muted">Домен или IP адрес для HTTPS доступа</small>
+                                {% for error in form.nginx_domain.errors %}
+                                    <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                            </div>
+
+                            <div class="mb-3">
+                                {{ form.nginx_cert_type.label(class="form-label text-gold") }}
+                                {{ form.nginx_cert_type(class="form-select bg-dark text-light border-secondary", id="nginx_cert_type") }}
+                                <small class="text-muted">Self-signed для внутренней сети, Let's Encrypt для публичного домена</small>
+                            </div>
+
+                            <div class="mb-3" id="nginx_email_field" style="display: none;">
+                                {{ form.nginx_email.label(class="form-label text-gold") }}
+                                {{ form.nginx_email(class="form-control bg-dark border-secondary text-light", placeholder="admin@example.com") }}
+                                <small class="text-muted">Используется для получения Let's Encrypt сертификата</small>
+                                {% for error in form.nginx_email.errors %}
+                                    <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                            </div>
+
+                            <div class="mb-3">
+                                {{ form.nginx_https_port.label(class="form-label text-gold") }}
+                                {{ form.nginx_https_port(class="form-control bg-dark border-secondary text-light") }}
+                                <small class="text-muted">Обычно 443</small>
+                            </div>
+
+                            <div class="form-check mb-3">
+                                {{ form.nginx_redirect_http(class="form-check-input") }}
+                                {{ form.nginx_redirect_http.label(class="form-check-label text-light") }}
+                                <small class="text-muted d-block">Автоматически перенаправлять HTTP запросы на HTTPS</small>
+                            </div>
+                        </div>
+                    {% endif %}
+
+                    {% if has_omnissiah_config %}
+                        <div class="mb-3">
+                            {{ form.ip_pool.label(class="form-label text-gold") }}
+                            <select name="{{ form.ip_pool.name }}" id="ip_pool_select" class="form-select bg-dark border-secondary text-light">
+                                {% if form.ip_pool.choices %}
+                                    {% for value, label in form.ip_pool.choices %}
+                                        <option value="{{ value }}" {% if form.ip_pool.data == value %}selected{% endif %}>{{ label }}</option>
+                                    {% endfor %}
+                                {% else %}
+                                    <option value="">Нет доступных IP</option>
+                                {% endif %}
+                            </select>
+                            <small class="text-muted">Выберите свободный IP из доступных</small>
+                            {% for error in form.ip_pool.errors %}
+                                <div class="invalid-feedback d-block">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+
+                        <div class="mb-3">
+                            {{ form.endpoint.label(class="form-label text-gold") }}
+                            {{ form.endpoint(class="form-control bg-dark border-secondary text-light", id="endpoint_field", placeholder="Автоматически из конфигурации") }}
+                            <small class="text-muted" id="endpoint_hint">Будет автоматически заполнен из конфигурации родительского узла</small>
+                            {% for error in form.endpoint.errors %}
+                                <div class="invalid-feedback d-block">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        
+                        {% if has_omnissiah_config %}
+                        <div class="form-check mb-3" id="deploy_via_ssh_container" style="display: none;">
+                            {{ form.deploy_via_ssh(class="form-check-input", id="deploy_via_ssh") }}
+                            {{ form.deploy_via_ssh.label(class="form-check-label text-light") }}
+                            <small class="text-muted d-block">Автоматически развернуть агент через SSH после создания</small>
+                        </div>
+                        {% endif %}
+                    {% endif %}
+
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-gold btn-lg" id="submit-btn">
+                            {% if has_omnissiah_config %}
+                                <i class="bi bi-plus-circle me-1"></i> Добавить объект
+                            {% else %}
+                                <i class="bi bi-save me-1"></i> Создать конфигурацию
+                            {% endif %}
+                        </button>
+                        <a href="{{ url_for('main_node') }}" class="btn btn-outline-secondary">
+                            Отмена
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно для SSH развертывания -->
+<div class="modal fade" id="sshDeployModal" tabindex="-1" aria-labelledby="sshDeployModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content bg-dark border-secondary text-light">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title text-gold" id="sshDeployModalLabel">
+                    <i class="bi bi-server me-2"></i>Развертывание через SSH
+                </h5>
+            </div>
+            <div class="modal-body">
+                <!-- Форма SSH параметров -->
+                <div id="ssh-params-form">
+                    <div class="mb-3">
+                        <label for="ssh_ip" class="form-label text-gold">IP адрес узла</label>
+                        <input type="text" class="form-control bg-dark border-secondary text-light" id="ssh_ip" placeholder="10.11.11.100" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="ssh_user" class="form-label text-gold">Пользователь SSH</label>
+                        <input type="text" class="form-control bg-dark border-secondary text-light" id="ssh_user" placeholder="nmc-admin" value="nmc-admin" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="ssh_password" class="form-label text-gold">Пароль SSH</label>
+                        <input type="password" class="form-control bg-dark border-secondary text-light" id="ssh_password" placeholder="Введите пароль" required>
+                    </div>
+                </div>
+                
+                <!-- Индикатор подключения -->
+                <div id="ssh-connecting" style="display: none;">
+                    <div class="text-center">
+                        <div class="spinner-border text-gold mb-3" role="status">
+                            <span class="visually-hidden">Подключение...</span>
+                        </div>
+                        <p class="text-light">Подключение к узлу...</p>
+                    </div>
+                </div>
+                
+                <!-- Прогресс передачи файлов -->
+                <div id="ssh-transfer" style="display: none;">
+                    <div class="mb-3">
+                        <label class="form-label text-gold">Передача файлов</label>
+                        <div class="progress bg-dark" style="height: 25px;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated bg-gold" 
+                                 role="progressbar" 
+                                 id="transfer-progress" 
+                                 style="width: 0%"
+                                 aria-valuenow="0" 
+                                 aria-valuemin="0" 
+                                 aria-valuemax="100">
+                                <span id="transfer-text">0%</span>
+                            </div>
+                        </div>
+                        <small class="text-muted" id="transfer-status">Подготовка...</small>
+                    </div>
+                </div>
+                
+                <!-- Подтверждение запуска -->
+                <div id="ssh-start-service" style="display: none;">
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle me-2"></i>
+                        Передача завершена успешно!
+                    </div>
+                    <p class="text-light">Запустить агент на удаленном узле?</p>
+                    <!-- Поле для sudo пароля (скрыто по умолчанию) -->
+                    <div id="ssh-sudo-password-container" style="display: none;" class="mt-3">
+                        <label for="ssh_sudo_password" class="form-label text-gold">Sudo пароль (если требуется)</label>
+                        <input type="password" class="form-control bg-dark border-secondary text-light" id="ssh_sudo_password" placeholder="Введите sudo пароль">
+                        <small class="text-muted">Пароль может потребоваться для запуска systemd сервиса</small>
+                    </div>
+                </div>
+                
+                <!-- Ожидание запуска -->
+                <div id="ssh-waiting-service" style="display: none;">
+                    <div class="text-center">
+                        <div class="spinner-border text-gold mb-3" role="status">
+                            <span class="visually-hidden">Ожидание...</span>
+                        </div>
+                        <p class="text-light" id="waiting-text">Ожидаем запуск сервиса...</p>
+                    </div>
+                </div>
+                
+                <!-- Успешное завершение -->
+                <div id="ssh-success" style="display: none;">
+                    <div class="alert alert-success">
+                        <i class="bi bi-check-circle me-2"></i>
+                        <strong>Успешно!</strong> Агент запущен и подключен.
+                    </div>
+                </div>
+                
+                <!-- Ошибка -->
+                <div id="ssh-error" style="display: none;">
+                    <div class="alert alert-danger">
+                        <i class="bi bi-exclamation-triangle me-2"></i>
+                        <strong>Ошибка:</strong> <span id="error-message"></span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer border-secondary">
+                <button type="button" class="btn btn-secondary" id="ssh-cancel-btn" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-gold" id="ssh-continue-btn">Продолжить</button>
+                <button type="button" class="btn btn-success" id="ssh-start-btn" style="display: none;">Да, запустить</button>
+                <button type="button" class="btn btn-secondary" id="ssh-close-btn" style="display: none;" data-bs-dismiss="modal">Закрыть</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Управление показом параметров WireGuard для главного сервера
+    const configureWireguardCheckbox = document.getElementById('configure_wireguard');
+    const wireguardSettings = document.getElementById('wireguard_settings');
+    
+    if (configureWireguardCheckbox && wireguardSettings) {
+        // Функция для показа/скрытия настроек WireGuard
+        function toggleWireguardSettings(show) {
+            if (show) {
+                wireguardSettings.style.display = 'block';
+                wireguardSettings.style.visibility = 'visible';
+                wireguardSettings.style.opacity = '1';
+                
+                // Убеждаемся что все поля внутри блока доступны для редактирования
+                const inputs = wireguardSettings.querySelectorAll('input, select, textarea');
+                inputs.forEach(input => {
+                    input.removeAttribute('disabled');
+                    input.removeAttribute('readonly');
+                    input.style.pointerEvents = 'auto';
+                    input.style.opacity = '1';
+                });
+                
+                // Фокусируемся на поле IP-пул для удобства
+                const ipPoolField = document.getElementById('ip_pool_field');
+                if (ipPoolField) {
+                    // Небольшая задержка чтобы блок успел отобразиться
+                    setTimeout(() => {
+                        ipPoolField.focus();
+                    }, 100);
+                }
+            } else {
+                wireguardSettings.style.display = 'none';
+            }
+        }
+        
+        // Обработчик изменения чекбокса
+        configureWireguardCheckbox.addEventListener('change', function() {
+            toggleWireguardSettings(this.checked);
+        });
+        
+        // Устанавливаем начальное состояние при загрузке страницы
+        // Важно: проверяем checked и показываем блок сразу
+        if (configureWireguardCheckbox.checked) {
+            toggleWireguardSettings(true);
+        } else {
+            toggleWireguardSettings(false);
+        }
+    }
+    
+    // Управление показом параметров nginx
+    const configureNginxCheckbox = document.getElementById('configure_nginx');
+    const nginxSettings = document.getElementById('nginx_settings');
+    const nginxCertType = document.getElementById('nginx_cert_type');
+    const nginxEmailField = document.getElementById('nginx_email_field');
+    
+    if (configureNginxCheckbox && nginxSettings) {
+        // Обработчик изменения чекбокса nginx
+        configureNginxCheckbox.addEventListener('change', function() {
+            if (this.checked) {
+                nginxSettings.style.display = 'block';
+                // Показываем/скрываем поле email в зависимости от типа сертификата
+                if (nginxCertType && nginxCertType.value === 'letsencrypt') {
+                    nginxEmailField.style.display = 'block';
+                }
+            } else {
+                nginxSettings.style.display = 'none';
+            }
+        });
+        
+        // Устанавливаем начальное состояние
+        if (configureNginxCheckbox.checked) {
+            nginxSettings.style.display = 'block';
+            if (nginxCertType && nginxCertType.value === 'letsencrypt') {
+                nginxEmailField.style.display = 'block';
+            }
+        }
+    }
+    
+    // Управление показом поля email в зависимости от типа сертификата
+    if (nginxCertType && nginxEmailField) {
+        nginxCertType.addEventListener('change', function() {
+            if (this.value === 'letsencrypt') {
+                nginxEmailField.style.display = 'block';
+            } else {
+                nginxEmailField.style.display = 'none';
+            }
+        });
+        
+        // Устанавливаем начальное состояние
+        if (nginxCertType.value === 'letsencrypt') {
+            nginxEmailField.style.display = 'block';
+        }
+    }
+    
+    // Логика для выбора родительского узла (для Magos)
+    const roleSelect = document.getElementById('role');
+    const centralNodeField = document.getElementById('parent_id');
+    const deployViaSshContainer = document.getElementById('deploy_via_ssh_container');
+    const ipPoolSelect = document.getElementById('ip_pool_select');
+    const endpointField = document.getElementById('endpoint_field');
+    const endpointHint = document.getElementById('endpoint_hint');
+
+    // Обновление списка доступных IP при изменении родительского узла
+    if (centralNodeField && ipPoolSelect) {
+        centralNodeField.addEventListener('change', function() {
+            const parentId = this.value;
+            if (parentId) {
+                fetch(`/api/available_ips?parent_id=${parentId}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success && data.ips) {
+                            // Очищаем текущие опции
+                            ipPoolSelect.innerHTML = '';
+                            
+                            // Добавляем новые опции
+                            if (data.ips.length > 0) {
+                                data.ips.forEach(ip => {
+                                    const option = document.createElement('option');
+                                    option.value = ip;
+                                    option.textContent = ip;
+                                    ipPoolSelect.appendChild(option);
+                                });
+                                
+                                // Выбираем первый доступный
+                                ipPoolSelect.value = data.ips[0];
+                            } else {
+                                // Если нет доступных IP, добавляем сообщение
+                                const option = document.createElement('option');
+                                option.value = '';
+                                option.textContent = 'Нет доступных IP';
+                                ipPoolSelect.appendChild(option);
+                            }
+                        } else {
+                            // Если ошибка, показываем сообщение
+                            ipPoolSelect.innerHTML = '<option value="">Ошибка загрузки IP</option>';
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Ошибка загрузки доступных IP:', error);
+                    });
+                
+                // Обновляем endpoint для выбранного родителя
+                updateEndpointForParent(parentId);
+            }
+        });
+    }
+    
+    function updateEndpointForParent(parentId) {
+        // Загружаем информацию о родителе для определения endpoint
+        fetch(`/get_node_info/${parentId}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data) {
+                    // Приоритет: heartbeat_ip -> endpoint -> endpoint Omnissiah
+                    let endpointValue = '';
+                    let hintText = '';
+                    
+                    if (data.heartbeat_ip) {
+                        endpointValue = data.heartbeat_ip;
+                        hintText = `Автоматически: IP из heartbeat (${data.heartbeat_ip})`;
+                    } else if (data.endpoint) {
+                        endpointValue = data.endpoint;
+                        hintText = `Автоматически: endpoint родителя (${data.endpoint})`;
+                    } else {
+                        hintText = 'Будет использован endpoint Omnissiah';
+                    }
+                    
+                    if (endpointField) {
+                        endpointField.value = endpointValue;
+                        endpointField.placeholder = endpointValue || 'Автоматически из конфигурации';
+                    }
+                    if (endpointHint) {
+                        endpointHint.textContent = hintText;
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Ошибка загрузки информации о родителе:', error);
+            });
+    }
+
+    if (roleSelect && centralNodeField) {
+        roleSelect.addEventListener('change', function() {
+            if(this.value === 'Magos') {
+                const mainServerOption = centralNodeField.querySelector('option[value="{{ omnissiah_config.id }}"]');
+                if (mainServerOption) {
+                    mainServerOption.selected = true;
+                    // Обновляем IP и endpoint для Omnissiah
+                    if (ipPoolSelect) {
+                        centralNodeField.dispatchEvent(new Event('change'));
+                    }
+                }
+                // Показываем галочку SSH развертывания для Magos
+                if (deployViaSshContainer) {
+                    deployViaSshContainer.style.display = 'block';
+                }
+            } else if(this.value === 'Cognitor') {
+                // Показываем галочку SSH развертывания для Cognitor
+                if (deployViaSshContainer) {
+                    deployViaSshContainer.style.display = 'block';
+                }
+            } else {
+                // Скрываем галочку для других ролей
+                if (deployViaSshContainer) {
+                    deployViaSshContainer.style.display = 'none';
+                    document.getElementById('deploy_via_ssh').checked = false;
+                }
+            }
+        });
+        
+        // Проверяем начальное значение
+        if ((roleSelect.value === 'Magos' || roleSelect.value === 'Cognitor') && deployViaSshContainer) {
+            deployViaSshContainer.style.display = 'block';
+        }
+        
+        // Обновляем endpoint при первой загрузке если родитель уже выбран
+        if (centralNodeField.value && roleSelect.value !== 'Omnissiah') {
+            updateEndpointForParent(centralNodeField.value);
+        }
+    }
+    
+    // Обработка отправки формы
+    const form = document.querySelector('form');
+    const submitBtn = document.getElementById('submit-btn');
+    const deployViaSshCheckbox = document.getElementById('deploy_via_ssh');
+    
+    if (form && submitBtn) {
+        form.addEventListener('submit', function(e) {
+            // Проверяем, включен ли deploy_via_ssh для Magos или Cognitor
+            const roleValue = document.getElementById('role')?.value;
+            const deployViaSsh = deployViaSshCheckbox?.checked;
+            
+            if (deployViaSsh && (roleValue === 'Magos' || roleValue === 'Cognitor')) {
+                e.preventDefault(); // Отменяем стандартную отправку формы
+                
+                // Показываем кнопку загрузки
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Создание...';
+                
+                // Собираем данные формы
+                const formData = new FormData(form);
+                
+                // Отправляем AJAX запрос
+                fetch(form.action || '/setup_wizard', {
+                    method: 'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Accept': 'application/json'
+                    },
+                    body: formData
+                })
+                .then(async response => {
+                    console.log('=== AJAX RESPONSE ===');
+                    console.log('Status:', response.status);
+                    console.log('OK:', response.ok);
+                    const contentType = response.headers.get('content-type') || '';
+                    console.log('Content-Type:', contentType);
+                    
+                    // Читаем ответ как текст сначала для диагностики
+                    const text = await response.text();
+                    console.log('Response text (first 1000 chars):', text.substring(0, 1000));
+                    
+                    let responseData;
+                    try {
+                        // Пытаемся распарсить как JSON
+                        responseData = JSON.parse(text);
+                        console.log('Parsed JSON:', responseData);
+                    } catch (e) {
+                        console.error('Failed to parse as JSON:', e);
+                        console.log('Full response text:', text);
+                        // Если не JSON, значит HTML страница
+                        if (response.ok) {
+                            throw new Error('Сервер вернул HTML вместо JSON. Проверьте логи сервера.');
+                        } else {
+                            throw new Error(`Ошибка сервера (${response.status}): ${text.substring(0, 200)}`);
+                        }
+                    }
+                    
+                    // Проверяем статус
+                    if (!response.ok && response.status >= 400) {
+                        const errorMsg = responseData.error || responseData.message || `Ошибка сервера (${response.status})`;
+                        console.error('Server error:', errorMsg);
+                        throw new Error(errorMsg);
+                    }
+                    
+                    return responseData;
+                })
+                .then(data => {
+                    console.log('=== PROCESSING RESPONSE ===');
+                    console.log('Data:', data);
+                    console.log('data.success:', data?.success);
+                    console.log('data.node_id:', data?.node_id);
+                    
+                    // Проверяем успешный ответ
+                    if (data && data.success && data.node_id) {
+                        console.log('✅ Узел успешно создан, ID:', data.node_id);
+                        
+                        // Проверяем наличие модального окна
+                        const sshModalElement = document.getElementById('sshDeployModal');
+                        console.log('sshModalElement found:', !!sshModalElement);
+                        
+                        if (sshModalElement) {
+                            window.currentNodeId = data.node_id; // Сохраняем ID созданного узла
+                            console.log('Set window.currentNodeId to:', data.node_id);
+                            
+                            // Сбрасываем состояние модального окна
+                            try {
+                                const paramsForm = document.getElementById('ssh-params-form');
+                                if (paramsForm) paramsForm.style.display = 'block';
+                                
+                                ['ssh-connecting', 'ssh-transfer', 'ssh-start-service', 'ssh-waiting-service', 'ssh-success', 'ssh-error'].forEach(id => {
+                                    const el = document.getElementById(id);
+                                    if (el) el.style.display = 'none';
+                                });
+                                
+                                // Показываем кнопки
+                                const continueBtn = document.getElementById('ssh-continue-btn');
+                                const cancelBtn = document.getElementById('ssh-cancel-btn');
+                                if (continueBtn) continueBtn.style.display = 'block';
+                                if (cancelBtn) cancelBtn.style.display = 'block';
+                                
+                                const startBtn = document.getElementById('ssh-start-btn');
+                                const closeBtn = document.getElementById('ssh-close-btn');
+                                if (startBtn) startBtn.style.display = 'none';
+                                if (closeBtn) closeBtn.style.display = 'none';
+                                
+                                // Очищаем поля
+                                const sshIp = document.getElementById('ssh_ip');
+                                const sshPassword = document.getElementById('ssh_password');
+                                if (sshIp) sshIp.value = '';
+                                if (sshPassword) sshPassword.value = '';
+                                
+                                console.log('✅ Modal state reset complete');
+                            } catch (resetError) {
+                                console.error('Error resetting modal state:', resetError);
+                            }
+                            
+                            // Открываем модальное окно
+                            try {
+                                console.log('Attempting to show modal...');
+                                const sshModal = bootstrap.Modal.getOrCreateInstance(sshModalElement);
+                                sshModal.show();
+                                console.log('✅ Modal.show() called');
+                            } catch (modalError) {
+                                console.error('Error showing modal:', modalError);
+                                // Fallback: пробуем напрямую через jQuery если Bootstrap не загружен
+                                if (typeof $ !== 'undefined') {
+                                    $('#sshDeployModal').modal('show');
+                                    console.log('✅ Modal shown via jQuery fallback');
+                                } else {
+                                    alert('Узел создан! Модальное окно не открылось. Обновите страницу.');
+                                }
+                            }
+                        } else {
+                            console.error('❌ Модальное окно SSH не найдено в DOM');
+                            alert('Узел создан, но модальное окно SSH не найдено. Обновите страницу.');
+                            window.location.reload();
+                        }
+                    } else {
+                        // Ошибка в ответе
+                        const errorMsg = data?.error || data?.message || 'Неизвестная ошибка создания узла';
+                        console.error('❌ Ошибка создания узла:', errorMsg);
+                        console.error('Full data:', data);
+                        throw new Error(errorMsg);
+                    }
+                })
+                .catch(error => {
+                    console.error('Ошибка:', error);
+                    alert('Ошибка: ' + error.message);
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = '<i class="bi bi-plus-circle me-1"></i> Добавить объект';
+                });
+            }
+            // Если deploy_via_ssh не включен, форма отправляется обычным способом
+        });
+    }
+    
+    // Обработчики для модального окна SSH развертывания
+    const sshModal = document.getElementById('sshDeployModal');
+    const sshContinueBtn = document.getElementById('ssh-continue-btn');
+    const sshStartBtn = document.getElementById('ssh-start-btn');
+    const sshCancelBtn = document.getElementById('ssh-cancel-btn');
+    const sshCloseBtn = document.getElementById('ssh-close-btn');
+    
+    if (sshModal && sshContinueBtn) {
+        sshContinueBtn.addEventListener('click', function() {
+            const sshIp = document.getElementById('ssh_ip').value;
+            const sshUser = document.getElementById('ssh_user').value;
+            const sshPassword = document.getElementById('ssh_password').value;
+            
+            if (!sshIp || !sshUser || !sshPassword) {
+                alert('Заполните все поля');
+                return;
+            }
+            
+            // Показываем индикатор подключения
+            document.getElementById('ssh-params-form').style.display = 'none';
+            document.getElementById('ssh-connecting').style.display = 'block';
+            sshContinueBtn.style.display = 'none';
+            sshCancelBtn.style.display = 'none';
+            
+            // Тестируем подключение
+            fetch('/api/ssh/connect', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    node_id: window.currentNodeId,
+                    ip: sshIp,
+                    user: sshUser,
+                    password: sshPassword
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Подключение успешно, начинаем передачу файлов
+                    document.getElementById('ssh-connecting').style.display = 'none';
+                    document.getElementById('ssh-transfer').style.display = 'block';
+                    
+                    // Начинаем развертывание
+                    startSSHDeploy(window.currentNodeId, sshIp, sshUser, sshPassword);
+                } else {
+                    throw new Error(data.error || 'Ошибка подключения');
+                }
+            })
+            .catch(error => {
+                console.error('Ошибка:', error);
+                document.getElementById('ssh-connecting').style.display = 'none';
+                document.getElementById('ssh-params-form').style.display = 'block';
+                document.getElementById('ssh-error').style.display = 'block';
+                document.getElementById('error-message').textContent = error.message;
+                sshContinueBtn.style.display = 'block';
+                sshCancelBtn.style.display = 'block';
+            });
+        });
+    }
+    
+    if (sshStartBtn) {
+        sshStartBtn.addEventListener('click', function() {
+            const sshIp = document.getElementById('ssh_ip').value;
+            const sshUser = document.getElementById('ssh_user').value;
+            const sshPassword = document.getElementById('ssh_password').value;
+            const sshSudoPassword = document.getElementById('ssh_sudo_password')?.value || '';
+            
+            document.getElementById('ssh-start-service').style.display = 'none';
+            document.getElementById('ssh-waiting-service').style.display = 'block';
+            sshStartBtn.style.display = 'none';
+            
+            // Запускаем сервис
+            startServiceWithRetry(window.currentNodeId, sshIp, sshUser, sshPassword, sshSudoPassword);
+        });
+    }
+    
+    function startServiceWithRetry(nodeId, ip, user, password, sudoPassword) {
+        fetch('/api/ssh/start_service', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                node_id: nodeId,
+                ip: ip,
+                user: user,
+                password: password,
+                sudo_password: sudoPassword || undefined
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // Ждем подключения агента
+                checkAgentConnection(nodeId);
+            } else if (data.requires_sudo_password) {
+                // Нужен sudo пароль - показываем поле
+                document.getElementById('ssh-waiting-service').style.display = 'none';
+                document.getElementById('ssh-start-service').style.display = 'block';
+                document.getElementById('ssh-sudo-password-container').style.display = 'block';
+                sshStartBtn.style.display = 'block';
+                document.getElementById('error-message').textContent = 'Требуется sudo пароль';
+                document.getElementById('ssh-error').style.display = 'block';
+            } else {
+                throw new Error(data.error || 'Ошибка запуска сервиса');
+            }
+        })
+        .catch(error => {
+            console.error('Ошибка:', error);
+            document.getElementById('ssh-waiting-service').style.display = 'none';
+            document.getElementById('ssh-start-service').style.display = 'block';
+            document.getElementById('ssh-error').style.display = 'block';
+            document.getElementById('error-message').textContent = error.message;
+            sshStartBtn.style.display = 'block';
+        });
+    }
+    
+    function startSSHDeploy(nodeId, ip, user, password) {
+        const progressBar = document.getElementById('transfer-progress');
+        const progressText = document.getElementById('transfer-text');
+        const statusText = document.getElementById('transfer-status');
+        
+        // Используем fetch с POST для отправки данных и обработки SSE потока
+        fetch('/api/ssh/deploy', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'text/event-stream'
+            },
+            body: JSON.stringify({
+                node_id: nodeId,
+                ip: ip,
+                user: user,
+                password: password
+            })
+        })
+        .then(async response => {
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ error: 'Ошибка сервера' }));
+                throw new Error(errorData.error || `HTTP ${response.status}`);
+            }
+            
+            // Проверяем что это SSE поток
+            const contentType = response.headers.get('content-type') || '';
+            if (!contentType.includes('text/event-stream')) {
+                // Если не SSE, обрабатываем как обычный JSON
+                const data = await response.json();
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                if (data.complete) {
+                    document.getElementById('ssh-transfer').style.display = 'none';
+                    document.getElementById('ssh-start-service').style.display = 'block';
+                    sshStartBtn.style.display = 'block';
+                    sshCancelBtn.style.display = 'block';
+                }
+                return;
+            }
+            
+            // Обрабатываем SSE поток вручную
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop(); // Сохраняем незавершенную строку
+                
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            
+                            if (data.error) {
+                                document.getElementById('ssh-transfer').style.display = 'none';
+                                document.getElementById('ssh-error').style.display = 'block';
+                                document.getElementById('error-message').textContent = data.error;
+                                return;
+                            }
+                            
+                            if (data.progress !== undefined) {
+                                progressBar.style.width = data.progress + '%';
+                                progressBar.setAttribute('aria-valuenow', data.progress);
+                                progressText.textContent = data.progress + '%';
+                                statusText.textContent = data.status || data.message || 'Передача файлов...';
+                            }
+                            
+                            // Проверяем завершение по complete или progress: 100
+                            if (data.complete || (data.progress === 100 && !data.error)) {
+                                document.getElementById('ssh-transfer').style.display = 'none';
+                                document.getElementById('ssh-start-service').style.display = 'block';
+                                const sshStartBtn = document.getElementById('ssh-start-btn');
+                                const sshCancelBtn = document.getElementById('ssh-cancel-btn');
+                                if (sshStartBtn) sshStartBtn.style.display = 'block';
+                                if (sshCancelBtn) sshCancelBtn.style.display = 'block';
+                                return;
+                            }
+                        } catch (e) {
+                            console.error('Error parsing SSE data:', e);
+                        }
+                    }
+                }
+            }
+        })
+        .catch(error => {
+            console.error('SSH Deploy Error:', error);
+            document.getElementById('ssh-transfer').style.display = 'none';
+            document.getElementById('ssh-error').style.display = 'block';
+            document.getElementById('error-message').textContent = error.message || 'Ошибка соединения';
+        });
+    }
+    
+    function checkAgentConnection(nodeId) {
+        const waitingText = document.getElementById('waiting-text');
+        let attempts = 0;
+        const maxAttempts = 30; // 30 попыток по 3 секунды = 90 секунд
+        
+        const checkInterval = setInterval(function() {
+            attempts++;
+            waitingText.textContent = `Ожидаем запуск сервиса... (попытка ${attempts}/${maxAttempts})`;
+            
+            fetch(`/api/ssh/check_mtls?node_id=${nodeId}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.connected) {
+                    clearInterval(checkInterval);
+                    document.getElementById('ssh-waiting-service').style.display = 'none';
+                    document.getElementById('ssh-success').style.display = 'block';
+                    sshCloseBtn.style.display = 'block';
+                    sshCancelBtn.style.display = 'none';
+                } else if (attempts >= maxAttempts) {
+                    clearInterval(checkInterval);
+                    document.getElementById('ssh-waiting-service').style.display = 'none';
+                    document.getElementById('ssh-error').style.display = 'block';
+                    document.getElementById('error-message').textContent = 'Таймаут ожидания подключения агента';
+                }
+            })
+            .catch(error => {
+                if (attempts >= maxAttempts) {
+                    clearInterval(checkInterval);
+                    document.getElementById('ssh-waiting-service').style.display = 'none';
+                    document.getElementById('ssh-error').style.display = 'block';
+                    document.getElementById('error-message').textContent = 'Ошибка проверки подключения';
+                }
+            });
+        }, 3000); // Проверяем каждые 3 секунды
+    }
+    
+    if (sshCloseBtn) {
+        sshCloseBtn.addEventListener('click', function() {
+            window.location.href = '/main_node/' + (window.currentNodeId || 1);
+        });
+    }
+});
+</script>
+{% endblock %}

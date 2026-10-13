@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Omnissiah Network Manager</title>
+    <!-- Подключите здесь свои CSS и JS -->
+    <style>
+        .sidebar {
+            width: 200px;
+            position: fixed;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+        }
+        .sidebar ul {
+            list-style: none;
+            padding: 0;
+        }
+        .sidebar li {
+            margin-bottom: 10px;
+        }
+        .sidebar a {
+            color: white;
+            text-decoration: none;
+        }
+        .content {
+            margin-left: 220px;
+            padding: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Боковое меню -->
+        <nav class="sidebar">
+            <ul>
+                <li><a href="{{ url_for('dashboard') }}">Главная</a></li>
+                <li><a href="{{ url_for('firewall') }}">Межсетевой экран</a></li>
+                {% if current_node %}
+                    <li><a href="{{ url_for('manage_connections', node_id=current_node.id) }}">Управление связями</a></li>
+                {% else %}
+                    <li><a href="#" onclick="alert('Сначала выберите узел')">Управление связями</a></li>
+                {% endif %}
+                <li><a href="{{ url_for('nmcwggconfig') }}">Управление объектами</a></li>
+                <li><a href="{{ url_for('profile') }}">Профиль</a></li>
+                <li><a href="{{ url_for('logout') }}">Выход</a></li>
+            </ul>
+        </nav>
+
+        <!-- Основное содержимое -->
+        <main class="content">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+</body>
+</html>
