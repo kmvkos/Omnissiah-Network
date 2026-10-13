@@ -84,3 +84,5 @@ ansible/.credentials-*
 ansible/artifacts/
 .ansible-venv/
 !ansible/roles/*/templates/*.conf.j2
+
+ansible/.control-update.lock

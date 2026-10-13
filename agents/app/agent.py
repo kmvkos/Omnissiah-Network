@@ -37,9 +37,16 @@ if load_config().get('manage_wireguard', True):
 if os.getenv('OMNISSIAH_AGENT_BACKGROUND', 'true').lower() == 'true':
     start_heartbeat_loop()
 
+try:
+    from pathlib import Path as _VersionPath
+    import json as _version_json
+    _runtime_version = _version_json.loads((_VersionPath(__file__).resolve().parents[2] / '.runtime-version.json').read_text())
+except (OSError, ValueError):
+    _runtime_version = {}
+
 @app.route("/health")
 def health():
-    return jsonify({"status": "alive"}), 200
+    return jsonify({"status": "alive", **_runtime_version}), 200
 
 @app.route("/status")
 def status():

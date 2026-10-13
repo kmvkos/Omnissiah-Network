@@ -3,6 +3,7 @@
 set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_DIR"
+UPDATE=false
 PREPARE_ONLY=false
 SSH_ONLY=false
 ACCESS_ONLY=false
@@ -13,6 +14,7 @@ SKIP_SYSTEM_PACKAGES=false
 ANSIBLE_ARGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --update) UPDATE=true; SKIP_SYSTEM_PACKAGES=true; shift ;;
         --prepare-only) PREPARE_ONLY=true; shift ;;
         --ssh-only) SSH_ONLY=true; SKIP_SYSTEM_PACKAGES=true; shift ;;
         --access-only) ACCESS_ONLY=true; SKIP_SYSTEM_PACKAGES=true; shift ;;
@@ -22,6 +24,7 @@ while [[ $# -gt 0 ]]; do
         --skip-system-packages) SKIP_SYSTEM_PACKAGES=true; shift ;;
         --help|-h)
             echo 'Запуск: bash control-install.sh [--password-auth] [--prepare-only | --ssh-only | --access-only] [--skip-system-packages] [-- параметры Ansible]'
+            echo '--update: обновить существующие узлы, сохранив резервные копии состояния.'
             echo '--password-auth: задать SSH/sudo-пароли в Vault и использовать вход по паролю.'
             echo '--configure-passwords: изменить сохранённые пароли и пароль Vault.'
             echo '--prepare-only: подготовить control и inventory без подключения к ВМ.'
@@ -35,6 +38,11 @@ done
 if [[ ( "$PREPARE_ONLY" == true && ( "$SSH_ONLY" == true || "$ACCESS_ONLY" == true ) ) || ( "$SSH_ONLY" == true && "$ACCESS_ONLY" == true ) ]]; then
     echo 'Выберите один режим: --prepare-only, --ssh-only или --access-only.' >&2
     exit 2
+fi
+if [[ "$UPDATE" == true ]]; then
+    [[ "$PREPARE_ONLY" == false && "$SSH_ONLY" == false && "$ACCESS_ONLY" == false && -f ansible/inventory.yml ]] || {
+        echo '--update требует существующий inventory и полный запуск.' >&2; exit 2;
+    }
 fi
 if [[ ! -f ansible/site.yml || ! -f deploy/package_source.py || ! -f agents/app/agent.py ]]; then
     echo 'Нужна полная скачанная папка проекта рядом с control-install.sh.' >&2
@@ -68,6 +76,7 @@ export PATH="$PROJECT_DIR/.ansible-venv/bin:$PATH"
 VAULT_FILE="$PROJECT_DIR/ansible/credentials.vault.yml"
 if [[ "$PREPARED_STAGE" == false && ( "$PASSWORD_AUTH" == true || -f "$VAULT_FILE" ) ]]; then
     NEXT_ARGS=(--prepared-stage)
+    [[ "$UPDATE" == false ]] || NEXT_ARGS+=(--update)
     [[ "$PREPARE_ONLY" == false ]] || NEXT_ARGS+=(--prepare-only)
     [[ "$SSH_ONLY" == false ]] || NEXT_ARGS+=(--ssh-only)
     [[ "$ACCESS_ONLY" == false ]] || NEXT_ARGS+=(--access-only)
@@ -107,5 +116,7 @@ if [[ ${#ANSIBLE_ARGS[@]} -eq 0 && ${#VAULT_ARGS[@]} -eq 0 ]]; then
     ANSIBLE_ARGS=(--ask-become-pass)
 fi
 python ../deploy/control_ssh.py --inventory inventory.yml -- "${VAULT_ARGS[@]}" "${ANSIBLE_ARGS[@]}"
+UPDATE_ARGS=()
+[[ "$UPDATE" == false ]] || UPDATE_ARGS=(-e omnissiah_update=true)
 echo 'Запускается развёртывание на все целевые узлы inventory.'
-exec ansible-playbook -i inventory.yml site.yml "${VAULT_ARGS[@]}" "${ANSIBLE_ARGS[@]}"
+exec ansible-playbook -i inventory.yml site.yml "${VAULT_ARGS[@]}" "${UPDATE_ARGS[@]}" "${ANSIBLE_ARGS[@]}"

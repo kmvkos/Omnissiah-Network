@@ -943,6 +943,12 @@ def api_magi_status():
 
     magi = General.query.filter_by(role='Magos').all()
 
+    if os.getenv('OMNISSIAH_REQUIRE_MTLS', 'false').lower() == 'true':
+        from management_status import peer_status
+        return jsonify([dict(id=node.id, name=node.name, ip=node.ip_pool,
+            vpn_status='online' if peer_status(node)['vpn_connected'] else 'offline',
+            service_status='online' if peer_status(node)['service_active'] else 'offline') for node in magi])
+
     try:
         wg_output = subprocess.run(["wg", "show", "all", "dump"],
                                    capture_output=True, text=True, check=True)
@@ -4866,21 +4872,12 @@ def main_node(node_id=None):
         else:
             peer.heartbeat_ip_display = peer.heartbeat_ip if peer.heartbeat_ip else None
         
-        # Статусы VPN и mTLS
-        if peer.last_handshake:
-            time_since_handshake = (datetime.now(timezone.utc) - 
-                                   (peer.last_handshake.replace(tzinfo=timezone.utc) if peer.last_handshake.tzinfo is None else peer.last_handshake))
-            peer.vpn_status_display = 'online' if time_since_handshake.total_seconds() < 180 else 'offline'
-        else:
-            peer.vpn_status_display = 'offline'
-        
-        if peer.last_heartbeat:
-            time_since_heartbeat = (datetime.now(timezone.utc) - 
-                                   (peer.last_heartbeat.replace(tzinfo=timezone.utc) if peer.last_heartbeat.tzinfo is None else peer.last_heartbeat))
-            peer.mtls_status_display = 'online' if time_since_heartbeat.total_seconds() < 90 else 'offline'
-        else:
-            peer.mtls_status_display = 'offline'
-    
+        from management_status import peer_status
+        observed = peer_status(peer)
+        peer.vpn_status_display = 'online' if observed['vpn_connected'] else 'offline'
+        peer.mtls_status_display = 'online' if observed['mtls_enabled'] else 'offline'
+        peer.management_status_display = 'online' if observed['service_active'] else 'offline'
+
     # Получаем интерфейсы для текущего узла
     interfaces = None
     if node.role == 'Omnissiah':
@@ -4916,57 +4913,11 @@ def main_node(node_id=None):
                 'ip': iface.get('ip', '')
             })
     
-    # Статус безопасности
-    security_status = None
-    if node:
-        if node.role == 'Omnissiah':
-            security_status = get_node_security_status(node)
-        elif node.role in ['Magos', 'Cognitor']:
-            vpn_enabled = node.wireguard_enabled if node.wireguard_enabled is not None else False
-            vpn_connected = False
-            service_active = False
-            mtls_enabled = False
-            
-            if vpn_enabled and node.last_handshake:
-                time_since_handshake = (datetime.now(timezone.utc) - 
-                                       (node.last_handshake.replace(tzinfo=timezone.utc) if node.last_handshake.tzinfo is None else node.last_handshake))
-                vpn_connected = time_since_handshake.total_seconds() < 180
-            
-            service_active = node.status in ['active', 'online']
-            
-            if node.last_heartbeat:
-                time_since_heartbeat = (datetime.now(timezone.utc) - 
-                                       (node.last_heartbeat.replace(tzinfo=timezone.utc) if node.last_heartbeat.tzinfo is None else node.last_heartbeat))
-                mtls_enabled = time_since_heartbeat.total_seconds() < 90
-            
-            if service_active and mtls_enabled and not vpn_connected:
-                status_color = 'warning'
-                status_text = 'Служба mTLS и VPN включена, но связь с Главным узлом не построена'
-            elif service_active and vpn_connected and mtls_enabled:
-                status_color = 'success'
-                status_text = 'Все службы активны'
-            elif service_active and vpn_connected:
-                status_color = 'info'
-                status_text = 'VPN включен, mTLS не активен'
-            elif service_active and mtls_enabled:
-                status_color = 'info'
-                status_text = 'mTLS включен, VPN не активен'
-            elif service_active:
-                status_color = 'warning'
-                status_text = 'Служба включена, но VPN и mTLS не активны'
-            else:
-                status_color = 'danger'
-                status_text = 'Служба выключена'
-            
-            security_status = {
-                'vpn_enabled': vpn_enabled,
-                'vpn_connected': vpn_connected,
-                'service_active': service_active,
-                'mtls_enabled': mtls_enabled,
-                'status_color': status_color,
-                'status_text': status_text
-            }
-    
+    # Management heartbeat, application health and VPN are independent.
+    from management_status import describe, peer_status
+    security_status = (get_node_security_status(node) if node.role == 'Omnissiah'
+                       else describe(peer_status(node)))
+
     return render_template('main_node.html',
                            node=node,
                            peers=peers,
@@ -5036,21 +4987,12 @@ def manage_node(node_id):
         else:
             peer.heartbeat_ip_display = peer.heartbeat_ip if peer.heartbeat_ip else None
         
-        # Статусы VPN и mTLS
-        if peer.last_handshake:
-            time_since_handshake = (datetime.now(timezone.utc) - 
-                                   (peer.last_handshake.replace(tzinfo=timezone.utc) if peer.last_handshake.tzinfo is None else peer.last_handshake))
-            peer.vpn_status_display = 'online' if time_since_handshake.total_seconds() < 180 else 'offline'
-        else:
-            peer.vpn_status_display = 'offline'
-        
-        if peer.last_heartbeat:
-            time_since_heartbeat = (datetime.now(timezone.utc) - 
-                                   (peer.last_heartbeat.replace(tzinfo=timezone.utc) if peer.last_heartbeat.tzinfo is None else peer.last_heartbeat))
-            peer.mtls_status_display = 'online' if time_since_heartbeat.total_seconds() < 90 else 'offline'
-        else:
-            peer.mtls_status_display = 'offline'
-    
+        from management_status import peer_status
+        observed = peer_status(peer)
+        peer.vpn_status_display = 'online' if observed['vpn_connected'] else 'offline'
+        peer.mtls_status_display = 'online' if observed['mtls_enabled'] else 'offline'
+        peer.management_status_display = 'online' if observed['service_active'] else 'offline'
+
     return render_template('manage_node.html',
                            node=node,
                            parent=parent,
@@ -5425,103 +5367,9 @@ def check_wg_interface(interface):
 
 
 def get_node_security_status(node):
-    """
-    Определяет статус безопасности узла (для Omnissiah):
-    Возвращает словарь с vpn_enabled, mtls_enabled, status_color, status_text
-    
-    Цвета статуса:
-    - Желтый (warning): только VPN включен
-    - Оранжевый (orange): только mTLS включен
-    - Красный (danger): VPN и mTLS выключены
-    - Зеленый (success): VPN и mTLS включены
-    """
-    # Проверка VPN (WireGuard) - для Omnissiah проверяем реальный статус интерфейса
-    vpn_enabled = False
-    if node and node.name:
-        try:
-            # ВАЖНО: Проверяем реальный статус интерфейса WireGuard, а не из БД
-            # 1. Проверяем, существует ли интерфейс и активен ли он
-            result = subprocess.run(
-                ['sudo', '-n', 'wg', 'show', node.name],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=2
-            )
-            
-            # Если команда вернула успех, проверяем что интерфейс действительно UP
-            if result.returncode == 0:
-                # Дополнительно проверяем через ip link что интерфейс UP
-                ip_result = subprocess.run(
-                    ['ip', 'link', 'show', node.name],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    timeout=2
-                )
-                if ip_result.returncode == 0:
-                    # Проверяем что в выводе есть "state UP"
-                    output = ip_result.stdout.decode('utf-8', errors='ignore')
-                    vpn_enabled = 'state UP' in output or 'UP' in output
-                else:
-                    # Если ip link не работает, используем результат wg show
-                    vpn_enabled = True
-            else:
-                vpn_enabled = False
-                app.logger.debug(f"WireGuard интерфейс {node.name} не активен (wg show вернул код {result.returncode})")
-        except Exception as e:
-            app.logger.debug(f"Ошибка проверки VPN для {node.name}: {str(e)}")
-            vpn_enabled = False
-    
-    # Проверка mTLS
-    mtls_enabled = False
-    if node and node.mtls_enabled and node.mtls_ca_cert_path:
-        # Проверяем, что CA сертификат существует
-        ca_cert_path = Path(node.mtls_ca_cert_path)
-        if ca_cert_path.exists():
-            # Проверяем, что в Nginx настроен mTLS (проверяем конфигурацию nginx)
-            if node.nginx_enabled and node.nginx_cert_path:
-                # Проверяем конфигурацию nginx на наличие mTLS настроек
-                try:
-                    nginx_config_path = Path("/etc/nginx/sites-available/omnissiah-network")
-                    if nginx_config_path.exists():
-                        with open(nginx_config_path, 'r') as f:
-                            nginx_config = f.read()
-                            # Проверяем наличие директив mTLS:
-                            # 1. ssl_client_certificate (CA сертификат)
-                            # 2. ssl_verify_client (optional или on)
-                            # 3. Проверка $ssl_client_verify в location /api/magos/
-                            has_ca = 'ssl_client_certificate' in nginx_config
-                            has_verify_client = ('ssl_verify_client optional' in nginx_config or 
-                                                'ssl_verify_client on' in nginx_config)
-                            has_mtls_location = ('location /api/magos/' in nginx_config and 
-                                                'if ($ssl_client_verify != "SUCCESS")' in nginx_config)
-                            if has_ca and has_verify_client and has_mtls_location:
-                                mtls_enabled = True
-                except Exception as e:
-                    app.logger.debug(f"Ошибка проверки mTLS конфигурации: {str(e)}")
-                    mtls_enabled = False
-    
-    # Определение цвета и текста статуса
-    if vpn_enabled and mtls_enabled:
-        status_color = 'success'  # Зеленый
-        status_text = 'VPN и mTLS активны'
-    elif vpn_enabled and not mtls_enabled:
-        status_color = 'warning'  # Желтый
-        status_text = 'Только VPN активен'
-    elif not vpn_enabled and mtls_enabled:
-        status_color = 'info'  # Оранжевый (используем info как аналог оранжевого)
-        status_text = 'Только mTLS активен'
-    else:
-        status_color = 'danger'  # Красный
-        status_text = 'VPN и mTLS выключены'
-    
-    return {
-        'vpn_connected': vpn_enabled,  # Для Omnissiah vpn_enabled означает что интерфейс активен
-        'vpn_enabled': vpn_enabled,
-        'service_active': node.status == 'active' if node else False,
-        'mtls_enabled': mtls_enabled,
-        'status_color': status_color,
-        'status_text': status_text
-    }
+    from management_status import controller_status, describe
+    peers = General.query.filter_by(role='Magos').all()
+    return describe(controller_status(node, peers))
 
 
 def sync_wireguard_peers(omnissiah_config):

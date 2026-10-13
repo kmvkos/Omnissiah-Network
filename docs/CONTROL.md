@@ -28,9 +28,12 @@ bash control-install.sh --password-auth
 Обновление на control:
 
 ```bash
-git pull --ff-only
-bash control-install.sh --skip-system-packages
+git pull --ff-only  # первый раз, чтобы получить control-update.sh
+bash control-update.sh
 ```
+
+В дальнейшем достаточно `bash control-update.sh`. Он сам получает `main` и
+обновляет все узлы inventory. [Порядок обновления и резервные копии](UPDATES.md).
 
 Не меняйте tracked-исходники прямо на control: playbook использует только
 закоммиченный Git revision. `inventory.yml`, Vault, venv и artifacts локальные,

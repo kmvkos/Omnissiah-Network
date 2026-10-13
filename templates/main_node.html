@@ -52,7 +52,11 @@
                         <td>{{ node.listen_port }}</td>
                     </tr>
                     <tr>
-                        <td><strong>Статус:</strong></td>
+                        <td><strong>Версия приложения:</strong></td>
+                        <td><code>{{ (config.OMNISSIAH_RUNTIME_VERSION.get('git_commit') or config.OMNISSIAH_RUNTIME_VERSION.get('source_revision') or 'Не записана')[:12] }}</code></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Статус VPN:</strong></td>
                         <td>
                             <span class="badge bg-{% if node.status == 'active' %}success{% else %}danger{% endif %}">
                                 {{ STATUS_CHOICES.get(node.status, node.status) }}
@@ -104,7 +108,7 @@
                         </td>
                     </tr>
                     <tr>
-                        <td><strong>Служба активна:</strong></td>
+                        <td><strong>Приложение работает:</strong></td>
                         <td>
                             {% if security_status.service_active %}
                                 <span class="badge bg-success">Да</span>
@@ -113,7 +117,12 @@
                             {% endif %}
                         </td>
                     </tr>
+                    <tr>
+                        <td><strong>Связь с Magos по mTLS:</strong></td>
+                        <td>{{ 'Подтверждена heartbeat' if security_status.mtls_connected else 'Нет свежего heartbeat' }}</td>
+                    </tr>
                 </table>
+                <p class="text-muted mb-0">mTLS защищает управление. VPN проверяется отдельно.</p>
                 {% else %}
                 <p class="text-muted">Статус безопасности недоступен</p>
                 {% endif %}
@@ -163,7 +172,7 @@
                         <th>Heartbeat IP</th>
                         <th>VPN статус</th>
                         <th>mTLS статус</th>
-                        <th>Статус</th>
+                        <th>Агент / heartbeat</th>
                         <th>Действия</th>
                     </tr>
                 </thead>
@@ -196,8 +205,8 @@
                             {% endif %}
                         </td>
                         <td>
-                            <span class="badge bg-{% if peer.status == 'active' %}success{% else %}danger{% endif %}">
-                                {{ STATUS_CHOICES.get(peer.status, peer.status) }}
+                            <span class="badge bg-{% if peer.management_status_display == 'online' %}success{% else %}danger{% endif %}">
+                                {{ 'Online' if peer.management_status_display == 'online' else 'Offline' }}
                             </span>
                         </td>
                         <td>

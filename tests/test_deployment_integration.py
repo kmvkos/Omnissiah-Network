@@ -33,6 +33,8 @@ def test_nginx_gunicorn_and_agent_heartbeat(tmp_path):
     for name in ('src', 'templates', 'deploy', 'agents'):
         shutil.copytree(ROOT / name, project / name, ignore=shutil.ignore_patterns('__pycache__', 'database'))
     shutil.copy(ROOT / 'mtls_utils.py', project)
+    version = dict(git_commit='a' * 40, source_revision='b' * 64)
+    (project / '.runtime-version.json').write_text(json.dumps(version))
     state = tmp_path / 'controller'
     agent_state = tmp_path / 'agent'
     ca = state / 'pki' / 'ca'; ensure_ca(ca)
@@ -73,7 +75,7 @@ def test_nginx_gunicorn_and_agent_heartbeat(tmp_path):
     try:
         for name, module, port, working_directory, extra in [
             ('controller','wsgi:app',controller_port,project,
-             dict(PYTHONPATH=str(project / 'src'))),
+             dict(PYTHONPATH=str(project / 'src'), OMNISSIAH_NGINX_CONFIG=str(nginx_config))),
             ('agent','app.agent:app',agent_port,project / 'agents',
              dict(PYTHONPATH=f'{project}/agents:{project}/src',
                   OMNISSIAH_AGENT_CONFIG=str(config_path),OMNISSIAH_AGENT_STATE_DIR=str(agent_state / 'database'),
@@ -96,6 +98,10 @@ def test_nginx_gunicorn_and_agent_heartbeat(tmp_path):
             if time.monotonic()>deadline:
                 pytest.fail('Services failed to start: '+''.join(p.read_text() for p in tmp_path.glob('*.log')))
             time.sleep(0.1)
+        assert session.get(base+'/health', timeout=3).json()['source_revision'] == version['source_revision']
+        # Replacing metadata on disk must not make an old process report a new version.
+        (project / '.runtime-version.json').write_text(json.dumps(dict(git_commit='c' * 40, source_revision='d' * 64)))
+        assert session.get(base+'/health', timeout=3).json()['git_commit'] == version['git_commit']
         # nginx must strip a caller's spoofed verification headers.
         forged = {'X-SSL-Client-Verify':'SUCCESS','X-SSL-Client-Cert':(agent_state / 'pki' / 'identity.crt').read_text().replace('\n','%0A')}
         assert session.post(base+'/api/magos/heartbeat',json={'name':'magos01'},headers=forged).status_code == 401
@@ -115,8 +121,23 @@ def test_nginx_gunicorn_and_agent_heartbeat(tmp_path):
         result=subprocess.run([sys.executable,'-c',probe],cwd=project / 'agents',capture_output=True,text=True,
             env=dict(os.environ,PYTHONPATH=f'{project}/agents:{project}/src',OMNISSIAH_AGENT_CONFIG=str(config_path)),timeout=15)
         assert result.returncode==0,result.stdout+result.stderr
+        check = subprocess.run([sys.executable, str(project / 'deploy/probe.py'), 'heartbeat',
+            '--config', str(config_path)], capture_output=True, text=True, timeout=15)
+        assert check.returncode == 0, check.stdout + check.stderr
         password=(state / 'admin-password').read_text().strip()
         assert session.post(base+'/login',data={'username':'admin','password':password},timeout=3).status_code==200
+        page = session.get(base+'/main_node', timeout=5)
+        assert page.status_code == 200
+        assert 'mTLS активен; VPN не активен' in page.text
+        assert 'Подтверждена heartbeat' in page.text
+        assert 'Агент / heartbeat' in page.text
+        assert 'VPN и mTLS выключены' not in page.text
+        # Reading status must not overwrite the stored desired VPN state.
+        connection = sqlite3.connect(state / 'data/vpngate.db')
+        before = connection.execute("SELECT status FROM general WHERE name='magos01'").fetchone()
+        assert session.get(base+'/api/magi_status', timeout=3).json()[0]['service_status'] == 'online'
+        assert connection.execute("SELECT status FROM general WHERE name='magos01'").fetchone() == before
+        connection.close()
     finally:
         session.close()
         for child in reversed(children):

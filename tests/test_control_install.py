@@ -168,3 +168,18 @@ def test_password_mode_prepare_encrypts_credentials_and_reuses_vault(downloaded_
             assert not any(member.name.startswith('ansible/') for member in archive.getmembers())
             assert not any(b'pipeline-secret' in archive.extractfile(member).read()
                            for member in archive.getmembers() if member.isfile())
+
+
+def test_runtime_payload_installs_with_restrictive_root_umask(downloaded_folder, tmp_path):
+    from install_source import install
+    result = package(downloaded_folder, tmp_path / 'artifacts')
+    destination = tmp_path / 'node'; destination.mkdir()
+    previous_umask = os.umask(0o077)
+    try:
+        assert install(destination, result['archive'])['changed']
+    finally:
+        os.umask(previous_umask)
+    assert (destination / 'src/wsgi.py').is_file()
+    assert (destination / 'templates/main_node.html').is_file()
+    assert (destination / 'src').stat().st_mode & 0o777 == 0o755
+    assert (destination / 'src/wsgi.py').stat().st_mode & 0o777 == 0o644

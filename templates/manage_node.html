@@ -102,7 +102,7 @@
                 <td>{{ node.listen_port }}</td>
             </tr>
             <tr>
-                <td>Статус:</td>
+                <td>Статус VPN:</td>
                 <td>
                     <span class="badge {% if node.status == 'active' %}badge-success-modern{% else %}badge-danger-modern{% endif %}">
                         {{ STATUS_CHOICES[node.status] if node.status in STATUS_CHOICES else node.status }}
@@ -158,7 +158,7 @@
                         <th>Heartbeat IP</th>
                         <th>VPN статус</th>
                         <th>mTLS статус</th>
-                        <th>Статус</th>
+                        <th>Статус VPN</th>
                         <th>Действия</th>
                     </tr>
                 </thead>

@@ -1,0 +1,61 @@
+---
+- name: Require an existing deployment and back up every node before updating
+  hosts: omnissiah:magos
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tags: [deploy]
+  tasks:
+    - name: Check existing node identity and application configuration
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ omnissiah_project_dir }}/.source.tar.gz"
+        - "{{ omnissiah_state_dir }}/pki/identity.key"
+        - "{{ omnissiah_state_dir }}/pki/identity.crt"
+        - "{{ omnissiah_project_dir + '/.env' if inventory_hostname in groups.omnissiah else omnissiah_state_dir + '/bootstrap_config.json' }}"
+        - "{{ omnissiah_state_dir + '/data/vpngate.db' if inventory_hostname in groups.omnissiah else omnissiah_state_dir + '/database/retra.db' }}"
+      register: existing_installation
+      when: omnissiah_update | default(false) | bool
+    - name: Refuse to create new nodes in update mode
+      ansible.builtin.assert:
+        that: item.stat.isreg | default(false)
+        fail_msg: "Existing installation is incomplete. Use control-install.sh for installation or enrollment."
+      loop: "{{ existing_installation.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: omnissiah_update | default(false) | bool
+    - name: Create private update helper directory
+      ansible.builtin.file:
+        path: "{{ omnissiah_state_dir }}/.update"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      when: omnissiah_update | default(false) | bool
+    - name: Stage the snapshot helper without replacing application sources
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../deploy/backup.py"
+        dest: "{{ omnissiah_state_dir }}/.update/backup.py"
+        owner: root
+        group: root
+        mode: '0600'
+      when: omnissiah_update | default(false) | bool
+    - name: Back up state and previous sources before any deployment changes
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - "{{ omnissiah_state_dir }}/.update/backup.py"
+          - --project
+          - "{{ omnissiah_project_dir }}"
+          - --state
+          - "{{ omnissiah_state_dir }}"
+          - --revision
+          - "{{ hostvars.localhost.source_revision }}"
+      register: update_snapshot
+      changed_when: (update_snapshot.stdout | from_json).changed
+      when: omnissiah_update | default(false) | bool
+    - name: Report the private pre-update snapshot
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: {{ (update_snapshot.stdout | from_json).backup }}"
+      when: omnissiah_update | default(false) | bool

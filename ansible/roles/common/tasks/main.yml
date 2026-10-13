@@ -44,24 +44,49 @@
 - name: Upload the source archive
   ansible.builtin.copy:
     src: "{{ hostvars.localhost.source_archive }}"
-    dest: "{{ omnissiah_project_dir }}/.source.tar.gz"
+    dest: "{{ omnissiah_project_dir }}/.source-next.tar.gz"
     owner: root
     mode: '0600'
   register: source_upload
-- name: Extract the application when the revision changes
-  ansible.builtin.unarchive:
-    src: "{{ omnissiah_project_dir }}/.source.tar.gz"
-    dest: "{{ omnissiah_project_dir }}"
-    remote_src: true
+- name: Create a private deployment helper directory
+  ansible.builtin.file:
+    path: "{{ omnissiah_state_dir }}/.update"
+    state: directory
     owner: root
     group: root
-  when: source_upload.changed
+    mode: '0700'
+- name: Stage the source installation helper
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../deploy/install_source.py"
+    dest: "{{ omnissiah_state_dir }}/.update/install_source.py"
+    owner: root
+    group: root
+    mode: '0600'
+- name: Install sources and remove files deleted from the previous source archive
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - "{{ omnissiah_state_dir }}/.update/install_source.py"
+      - --project
+      - "{{ omnissiah_project_dir }}"
+      - --archive
+      - "{{ omnissiah_project_dir }}/.source-next.tar.gz"
+  register: source_install
+  changed_when: (source_install.stdout | from_json).changed
 - name: Install dependencies into the node's venv
   ansible.builtin.pip:
     requirements: "{{ omnissiah_project_dir }}/{{ 'agents/' if inventory_hostname in groups.magos else '' }}requirements.txt"
     virtualenv: "{{ omnissiah_project_dir }}/venv"
     virtualenv_command: /usr/bin/python3 -m venv
   register: dependencies_install
+- name: Save the source version installed on this node
+  ansible.builtin.copy:
+    content: "{{ {'git_commit': hostvars.localhost.source_git_commit, 'source_revision': hostvars.localhost.source_revision} | to_nice_json }}\n"
+    dest: "{{ omnissiah_project_dir }}/.runtime-version.json"
+    owner: root
+    group: root
+    mode: '0644'
+  register: runtime_version
 - name: Create this node's private key and CSR locally
   ansible.builtin.command:
     argv:

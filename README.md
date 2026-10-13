@@ -39,9 +39,13 @@ Magos, адреса и SSH-пользователя, сохранит SSH/sudo-�
 Обновление и повторный запуск:
 
 ```bash
-git pull --ff-only
-bash control-install.sh --skip-system-packages
+git pull --ff-only  # один раз, чтобы получить команду обновления
+bash control-update.sh
 ```
+
+Команда обновления получает `main`, сохраняет резервную копию на каждой ВМ,
+обновляет Omnissiah и всех Magos и проверяет версии процессов и mTLS.
+Подробнее: **[docs/UPDATES.md](docs/UPDATES.md)**.
 
 Inventory и Vault остаются локальными и не попадают в Git. Переход из старой
 папки ZIP, диагностика sudo и подробности: **[docs/CONTROL.md](docs/CONTROL.md)**.

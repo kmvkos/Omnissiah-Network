@@ -372,7 +372,7 @@
                         <div class="node-name" style="font-size: 1.25rem;">{{ omnissiah_server.name }}</div>
                         <div class="node-ip">{{ omnissiah_server.ip_pool }}</div>
                         <span class="badge {% if omnissiah_server.status == 'active' %}badge-success-modern{% else %}badge-danger-modern{% endif %}">
-                            {{ STATUS_CHOICES[omnissiah_server.status] if omnissiah_server.status in STATUS_CHOICES else omnissiah_server.status }}
+                            VPN: {{ STATUS_CHOICES[omnissiah_server.status] if omnissiah_server.status in STATUS_CHOICES else omnissiah_server.status }}
                         </span>
                     </div>
                 </div>

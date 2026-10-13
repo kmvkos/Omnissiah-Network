@@ -35,6 +35,7 @@ def package(root, output_directory):
     root, output_directory = Path(root).resolve(), Path(output_directory).resolve()
     if not (root / 'src/app.py').is_file() or not (root / 'agents/app/agent.py').is_file():
         raise ValueError('The full project folder is required, including src/ and agents/')
+    git_commit = None
     if (root / '.git').exists():
         if not shutil.which('git'):
             raise ValueError('This folder is a Git checkout, but git is unavailable')
@@ -42,6 +43,7 @@ def package(root, output_directory):
                                 check=True, capture_output=True, text=True)
         if result.stdout:
             raise ValueError('Commit project changes before deploying from a Git checkout')
+        git_commit = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
         paths = subprocess.check_output(['git', '-C', str(root), 'ls-files', '-z']).decode().strip('\0').split('\0')
     else:
         paths = list(ROOT_FILES)
@@ -78,7 +80,7 @@ def package(root, output_directory):
     if changed:
         output.write_bytes(content)
         output.chmod(0o600)
-    return {'changed': changed, 'revision': revision, 'archive': str(output), 'files': len(files)}
+    return {'changed': changed, 'revision': revision, 'archive': str(output), 'files': len(files), 'git_commit': git_commit}
 
 
 if __name__ == '__main__':

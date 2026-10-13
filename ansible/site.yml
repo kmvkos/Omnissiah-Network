@@ -55,9 +55,12 @@
     - name: Share artifact location with deployment plays
       ansible.builtin.set_fact:
         source_revision: "{{ (source_package.stdout | from_json).revision }}"
+        source_git_commit: "{{ (source_package.stdout | from_json).git_commit }}"
         source_archive: "{{ (source_package.stdout | from_json).archive }}"
 
 - import_playbook: access.yml
+
+- import_playbook: update-preflight.yml
 
 - name: Bootstrap Python and prepare every Linux node
   hosts: omnissiah:magos
@@ -155,3 +158,21 @@
     - name: Report successful enrollment
       ansible.builtin.debug:
         msg: "{{ inventory_hostname }}: authenticated heartbeat and controller-to-agent HTTPS succeeded. VPN is not yet configured."
+
+- name: Record the verified deployment on every node
+  hosts: omnissiah:magos
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tags: [deploy]
+  tasks:
+    - name: Save the successfully verified source revision
+      ansible.builtin.copy:
+        content: "{{ {'git_commit': hostvars.localhost.source_git_commit, 'source_revision': hostvars.localhost.source_revision} | to_nice_json }}\n"
+        dest: "{{ omnissiah_state_dir }}/deployment.json"
+        owner: root
+        group: "{{ omnissiah_service_user }}"
+        mode: '0640'
+    - name: Report successful deployment
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: verified Git {{ hostvars.localhost.source_git_commit | default('downloaded folder', true) }}, source {{ hostvars.localhost.source_revision }}"

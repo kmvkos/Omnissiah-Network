@@ -1,5 +1,7 @@
 """Identity checks for backends exposed only through the managed nginx proxy."""
 import os
+import json
+from pathlib import Path
 
 from flask import jsonify, request
 from flask_login import current_user
@@ -9,12 +11,19 @@ from proxy_identity import proxy_identity
 
 
 def install_management_auth(app):
+    version_path = Path(__file__).resolve().parents[1] / '.runtime-version.json'
+    try:
+        runtime_version = json.loads(version_path.read_text())
+    except (OSError, ValueError):
+        runtime_version = {}
+    app.config['OMNISSIAH_RUNTIME_VERSION'] = runtime_version
+
     @app.get('/health')
     def deployment_health():
         from nmc_models import db
         from sqlalchemy import text
         db.session.execute(text("SELECT 1"))
-        return jsonify(status="ok", component="Omnissiah")
+        return jsonify(status="ok", component="Omnissiah", **runtime_version)
 
     @app.before_request
     def require_management_identity():

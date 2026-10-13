@@ -68,10 +68,17 @@
 - name: Check nginx configuration before restarting any application
   ansible.builtin.command: /usr/sbin/nginx -t
   changed_when: false
+- name: Read the version of any currently running application
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ 33787 if inventory_hostname in groups.omnissiah else 5001 }}/health"
+    status_code: 200
+  register: current_runtime
+  failed_when: false
+  changed_when: false
 - name: Restart application after source or dependency changes
   ansible.builtin.debug:
     msg: Application files or dependencies changed.
-  changed_when: source_upload.changed or dependencies_install.changed or (enrollment.changed | default(false))
+  changed_when: source_install.changed or dependencies_install.changed or runtime_version.changed or (enrollment.changed | default(false)) or (current_runtime.json | default({})).get('source_revision') != hostvars.localhost.source_revision or (current_runtime.json | default({})).get('git_commit') != hostvars.localhost.source_git_commit
   notify: Restart application
 - name: Enable and start both services
   ansible.builtin.systemd_service:
@@ -90,3 +97,9 @@
   retries: 10
   delay: 3
   until: backend_health.status | default(0) == 200
+- name: Verify the running process loaded the expected source revision
+  ansible.builtin.assert:
+    that:
+      - backend_health.json.source_revision == hostvars.localhost.source_revision
+      - backend_health.json.git_commit == hostvars.localhost.source_git_commit
+    fail_msg: The running application is not using the deployed source revision.
