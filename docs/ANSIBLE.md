@@ -69,7 +69,12 @@ HTTPS по умолчанию слушает TCP 8443 на `ansible_host`.
 
 ```bash
 bash control-install.sh --ssh-only
+bash control-install.sh --access-only
 ```
+
+Первый режим проверяет SSH, второй — sudo/root на каждом узле без установки
+компонентов и без требования Python на ВМ. Подробности ошибок sudo —
+в [CONTROL.md](CONTROL.md#отдельно-проверить-sudo).
 
 Установите SSH-ключ своего АРМ для выбранного пользователя на каждой ВМ,
 например через `ssh-copy-id`. При первом входе проверьте и подтвердите
@@ -103,7 +108,8 @@ bash ansible/deploy.sh --ask-become-pass
 `--check` не поддерживает полный bootstrap; для предварительной проверки
 используйте `--syntax-check`. Не отключайте проверку host key и TLS.
 
-Playbook проверяет inventory до доступа к ВМ, переносит runtime-исходники
+Playbook проверяет inventory и sudo/root на всех узлах до установки,
+останавливает весь запуск при ошибке любого узла, переносит runtime-исходники
 с control, устанавливает Python и пакеты, создаёт отдельный системный аккаунт,
 готовит сертификаты, регистрирует узлы, запускает службы и выполняет
 heartbeat через mTLS, а также HTTPS-запрос Omnissiah → Magos.

@@ -1,0 +1,26 @@
+---
+- name: Verify administrative access on every target before installation
+  hosts: omnissiah:magos
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  tags: [access, deploy]
+  tasks:
+    - name: Verify sudo is available for non-root SSH accounts
+      vars:
+        ansible_become: false
+      ansible.builtin.raw: |
+        if test "$(id -u)" -eq 0 || command -v sudo >/dev/null 2>&1; then
+          echo ADMIN_ACCESS_TOOL_AVAILABLE
+        else
+          echo 'sudo is missing. Install sudo and authorize the SSH account using the VM console/root account.' >&2
+          exit 1
+        fi
+      changed_when: false
+    - name: Verify privilege escalation returns root on every target
+      become: true
+      ansible.builtin.raw: |
+        test "$(id -u)" -eq 0 && echo OMNISSIAH_ROOT_ACCESS_OK
+      register: root_access
+      changed_when: false
+      failed_when: root_access.rc != 0 or 'OMNISSIAH_ROOT_ACCESS_OK' not in root_access.stdout

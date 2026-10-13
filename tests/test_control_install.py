@@ -97,7 +97,7 @@ def test_control_installer_prepare_from_downloaded_folder(downloaded_folder, cou
     assert not (folder / '.git').exists()
 
 
-@pytest.mark.parametrize('mode', ['--ssh-only', '--skip-system-packages'])
+@pytest.mark.parametrize('mode', ['--ssh-only', '--access-only', '--skip-system-packages'])
 @pytest.mark.skipif(not os.getenv('OMNISSIAH_TEST_CONTROL_VENV'), reason='Ansible validation environment is required')
 def test_control_installer_stops_before_deployment_on_failed_ssh(downloaded_folder, tmp_path, mode):
     folder = downloaded_folder
@@ -115,5 +115,25 @@ def test_control_installer_stops_before_deployment_on_failed_ssh(downloaded_fold
     assert result.stderr.count('SSH не готов:') == 4
     assert 'SSH-проверка не пройдена; развёртывание не запущено' in result.stderr
     assert 'Install Python before' not in result.stdout
-    if mode == '--ssh-only':
+    if mode in ('--ssh-only', '--access-only'):
         assert not (folder / 'ansible/artifacts').exists()
+
+
+@pytest.mark.skipif(not os.getenv('OMNISSIAH_TEST_CONTROL_VENV') or os.geteuid() != 0,
+                    reason='Ansible validation environment and local root required')
+def test_access_only_installer_checks_root_without_preparing_or_installing(downloaded_folder, tmp_path):
+    folder = downloaded_folder
+    (folder / '.ansible-venv').symlink_to(os.environ['OMNISSIAH_TEST_CONTROL_VENV'], target_is_directory=True)
+    inventory = create_inventory([f'192.168.50.{i}' for i in range(10, 14)], 'admin')
+    inventory['all']['vars'].update(ansible_connection='local', ansible_become=False)
+    (folder / 'ansible/inventory.yml').write_text(json.dumps(inventory))
+    fake_bin = tmp_path / 'bin'; fake_bin.mkdir()
+    fake_ssh = fake_bin / 'ssh'; fake_ssh.write_text('#!/bin/sh\nexit 0\n'); fake_ssh.chmod(0o755)
+    environment = dict(os.environ, PATH=str(fake_bin) + ':' + os.environ['PATH'])
+    result = subprocess.run(['bash', str(folder / 'control-install.sh'), '--access-only', '--', '--become'],
+                            cwd=folder, capture_output=True, text=True, env=environment, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'Verify privilege escalation returns root' in result.stdout
+    assert result.stdout.count('SSH OK:') == 4
+    assert 'Install system dependencies' not in result.stdout
+    assert not (folder / 'ansible/artifacts').exists()

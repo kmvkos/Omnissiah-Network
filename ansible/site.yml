@@ -4,6 +4,7 @@
   connection: local
   gather_facts: false
   become: false
+  any_errors_fatal: true
   tags: [prepare]
   tasks:
     - name: Require one controller and at least one Magos
@@ -56,10 +57,13 @@
         source_revision: "{{ (source_package.stdout | from_json).revision }}"
         source_archive: "{{ (source_package.stdout | from_json).archive }}"
 
+- import_playbook: access.yml
+
 - name: Bootstrap Python and prepare every Linux node
   hosts: omnissiah:magos
   become: true
   gather_facts: false
+  any_errors_fatal: true
   tags: [deploy]
   pre_tasks:
     - name: Install Python before using Python-based modules
@@ -89,6 +93,7 @@
   hosts: omnissiah
   become: true
   gather_facts: false
+  any_errors_fatal: true
   tags: [deploy]
   roles:
     - controller
@@ -97,6 +102,7 @@
   hosts: omnissiah:magos
   become: true
   gather_facts: false
+  any_errors_fatal: true
   tags: [deploy]
   roles:
     - services
@@ -105,6 +111,7 @@
   hosts: magos
   become: true
   gather_facts: false
+  any_errors_fatal: true
   tags: [deploy]
   tasks:
     - name: Send heartbeat with the agent certificate and validate the server certificate
