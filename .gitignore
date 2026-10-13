@@ -79,6 +79,8 @@ general@*
 ansible/inventory.yml
 ansible/inventory.local.yml
 ansible/vars.secret.yml
+ansible/credentials.vault.yml
+ansible/.credentials-*
 ansible/artifacts/
 .ansible-venv/
 !ansible/roles/*/templates/*.conf.j2

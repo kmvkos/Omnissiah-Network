@@ -137,3 +137,34 @@ def test_access_only_installer_checks_root_without_preparing_or_installing(downl
     assert result.stdout.count('SSH OK:') == 4
     assert 'Install system dependencies' not in result.stdout
     assert not (folder / 'ansible/artifacts').exists()
+
+
+@pytest.mark.skipif(not os.getenv('OMNISSIAH_TEST_CONTROL_VENV'), reason='Ansible validation environment required')
+def test_password_mode_prepare_encrypts_credentials_and_reuses_vault(downloaded_folder, tmp_path):
+    from control_passwords import vault_environment
+    folder = downloaded_folder
+    (folder / '.ansible-venv').symlink_to(os.environ['OMNISSIAH_TEST_CONTROL_VENV'], target_is_directory=True)
+    document = create_inventory([f'192.168.50.{i}' for i in range(10, 14)], 'admin')
+    (folder / 'ansible/inventory.yml').write_text(json.dumps(document))
+    fake_bin = tmp_path / 'bin'; fake_bin.mkdir()
+    tool = fake_bin / 'sshpass'; tool.write_text('#!/bin/sh\nexit 0\n'); tool.chmod(0o755)
+    environment = dict(os.environ, PIP_NO_INDEX='1', PATH=str(fake_bin) + ':' + os.environ['PATH'])
+    command = ['bash', str(folder / 'control-install.sh'), '--skip-system-packages', '--prepare-only']
+    result = subprocess.run(command + ['--password-auth'], cwd=folder, env=environment,
+                            input='ssh-pipeline-secret\nsudo-pipeline-secret\nunlock-pipeline\nunlock-pipeline\n',
+                            capture_output=True, text=True, timeout=45)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'Control подготовлен' in result.stdout
+    path = folder / 'ansible/credentials.vault.yml'; encrypted = path.read_bytes()
+    assert encrypted.startswith(b'$ANSIBLE_VAULT;')
+    assert b'ssh-pipeline-secret' not in encrypted and b'sudo-pipeline-secret' not in encrypted
+    result = subprocess.run(command, cwd=folder, env=environment, input='unlock-pipeline\n',
+                            capture_output=True, text=True, timeout=45)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'changed=0' in result.stdout
+    assert path.read_bytes() == encrypted
+    for archive_path in (folder / 'ansible/artifacts').glob('*.tar.gz'):
+        with tarfile.open(archive_path) as archive:
+            assert not any(member.name.startswith('ansible/') for member in archive.getmembers())
+            assert not any(b'pipeline-secret' in archive.extractfile(member).read()
+                           for member in archive.getmembers() if member.isfile())

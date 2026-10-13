@@ -44,14 +44,15 @@ def test_unknown_host_is_confirmed_in_terminal_then_key_login_rechecked(monkeypa
     assert 'BatchMode=yes' in calls[2][0]
 
 
-def test_changed_host_key_stops_without_prompt_or_removal(monkeypatch, capsys):
+@pytest.mark.parametrize('password', [None, 'test-password'])
+def test_changed_host_key_stops_without_prompt_or_removal(monkeypatch, capsys, password):
     calls = []
     def run(command, **kwargs):
         calls.append(command)
         return subprocess.CompletedProcess(command, 255, '',
             'WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!\nHost key verification failed.')
     monkeypatch.setattr(subprocess, 'run', run)
-    assert not verify_host('magos03', {'ansible_host': '192.168.50.13'}, interactive=True)
+    assert not verify_host('magos03', {'ansible_host': '192.168.50.13', 'ansible_password': password}, interactive=True)
     assert len(calls) == 1
     assert 'known_hosts не изменён' in capsys.readouterr().err
 
@@ -176,3 +177,18 @@ def test_real_ssh_unknown_host_confirmation_repeat_and_changed_key(tmp_path):
     finally:
         stop.set(); thread.join(timeout=5); listener.close()
         assert not thread.is_alive()
+
+
+def test_password_mode_confirms_host_but_defers_login_to_ansible(monkeypatch):
+    results = iter([subprocess.CompletedProcess([], 255, '', 'Host key verification failed.'),
+                    subprocess.CompletedProcess([], 255),
+                    subprocess.CompletedProcess([], 255, '', 'Permission denied (password).')])
+    calls = []
+    def run(command, **kwargs):
+        calls.append(command)
+        return next(results)
+    monkeypatch.setattr(subprocess, 'run', run)
+    assert verify_host('magos03', {'ansible_host': '192.168.50.13', 'ansible_password': 'test-password'}, interactive=True)
+    assert len(calls) == 3
+    assert 'StrictHostKeyChecking=ask' in calls[1]
+    assert 'StrictHostKeyChecking=yes' in calls[2]

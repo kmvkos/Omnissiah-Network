@@ -27,11 +27,13 @@ Ansible управляет установкой. После первоначал
 и в каталоге проекта выполните:
 
 ```bash
-bash control-install.sh
+bash control-install.sh --password-auth
 ```
 
 Он установит Ansible, спросит количество Magos, адреса узлов и SSH-пользователя,
-подготовит inventory, проверит SSH/sudo на всех узлах и запустит раскатку.
+подготовит inventory, сохранит SSH/sudo-пароли в Ansible Vault,
+проверит доступ на всех узлах и запустит раскатку. При повторном запуске
+с `--skip-system-packages` потребуется только пароль Vault.
 Для отдельной проверки доступа: `bash control-install.sh --access-only`. Git-клон для этого способа не нужен.
 `control` управляет установкой и не входит в список VPN-узлов.
 

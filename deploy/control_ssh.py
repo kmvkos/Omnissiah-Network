@@ -1,4 +1,4 @@
-"""Verify SSH host trust and key login before bootstrap, without remote Python."""
+"""Verify SSH host trust and key login (or defer password login to Ansible) before bootstrap, without remote Python."""
 import argparse
 import json
 import os
@@ -14,11 +14,17 @@ def inventory_hosts(inventory, ansible_args=()):
     options.add_argument('-u', '--user')
     options.add_argument('--private-key', '--key-file')
     options.add_argument('-e', '--extra-vars', action='append', default=[])
+    options.add_argument('--vault-password-file', '--vault-pass-file')
+    options.add_argument('--vault-id', action='append', default=[])
     args, _ = options.parse_known_args(ansible_args)
     command = ['ansible-inventory', '-i', str(inventory), '--playbook-dir',
                str(inventory.parent), '--list']
     for value in args.extra_vars:
         command.extend(['-e', value])
+    if args.vault_password_file:
+        command.extend(['--vault-password-file', args.vault_password_file])
+    for value in args.vault_id:
+        command.extend(['--vault-id', value])
     result = subprocess.run(command, capture_output=True, text=True, check=True)
     resolved = json.loads(result.stdout)
     return [(name, variables, args.user, args.private_key)
@@ -44,6 +50,11 @@ def ssh_command(variables, user=None, private_key=None):
             '-o', 'ControlPath=none'] + command[1:] + ['--', address, 'true']
 
 
+def password_login_pending(error):
+    return ('Permission denied' in error and not any(message in error for message in
+            ('Host key verification failed', 'HOST IDENTIFICATION HAS CHANGED', 'Offending ', 'REVOKED HOST KEY')))
+
+
 def verify_host(name, variables, user=None, private_key=None, interactive=None):
     command = ssh_command(variables, user, private_key)
     environment = dict(os.environ, SSH_ASKPASS_REQUIRE='never', LC_ALL='C')
@@ -52,6 +63,10 @@ def verify_host(name, variables, user=None, private_key=None, interactive=None):
         print(f'SSH OK: {name}', flush=True)
         return True
     error = result.stderr
+    password_auth = any(variables.get(option) for option in ('ansible_password', 'ansible_ssh_password', 'ansible_ssh_pass'))
+    if password_auth and password_login_pending(error):
+        print(f'SSH host key OK: {name}; вход по паролю проверит Ansible.', flush=True)
+        return True
     changed_key = ('REMOTE HOST IDENTIFICATION HAS CHANGED' in error
                    or 'Offending ' in error or 'REVOKED HOST KEY' in error)
     unknown_key = 'Host key verification failed' in error or 'is known for' in error
@@ -70,6 +85,9 @@ def verify_host(name, variables, user=None, private_key=None, interactive=None):
             print(f'SSH OK: {name}', flush=True)
             return True
         error = result.stderr
+        if password_auth and password_login_pending(error):
+            print(f'SSH host key OK: {name}; вход по паролю проверит Ansible.', flush=True)
+            return True
     print(f'SSH не готов: {name}\n{error.strip()}', file=sys.stderr, flush=True)
     if changed_key:
         print('Ключ сервера изменился. Сверьте новый отпечаток на ВМ; known_hosts не изменён.', file=sys.stderr)
