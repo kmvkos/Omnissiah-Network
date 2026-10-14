@@ -7,6 +7,7 @@
   "ip_pool": {{ omnissiah_vpn_address | to_json }},
   "listen_port": 51820,
   "manage_wireguard": false,
+  "vpn_control_enabled": true,
   "mtls_enabled": true,
   "mtls_required": true,
   "mtls_cert_file": {{ (omnissiah_state_dir ~ '/pki/identity.crt') | to_json }},
