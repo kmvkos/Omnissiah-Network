@@ -185,6 +185,21 @@ def main():
         if stored_config.is_symlink() or not stored_config.is_file() or not stored_config.read_text().startswith("# Managed by Omnissiah VPN v2\\n"):
             raise HelperError("Refusing to overwrite a configuration not owned by VPN v2")
     active = subprocess.run(["wg", "show", IFACE], capture_output=True).returncode == 0
+    if args.command == "apply":
+        # wg syncconf updates peers but does NOT manage Linux routes.
+        # Refuse an active topology change until route reconciliation exists.
+        def peer_routes(text):
+            return sorted(
+                value.split("=", 1)[1].strip()
+                for value in text.splitlines()
+                if value.strip().startswith("AllowedIPs =")
+            )
+        current_routes = peer_routes(stored_config.read_text()) if stored_config.exists() else []
+        desired_routes = sorted(
+            route for peer in data["peers"] for route in peer["allowed_ips"]
+        )
+        if current_routes != desired_routes:
+            raise HelperError("Live route-set changes are not supported; use a controlled maintenance procedure")
     if args.command == "apply" and not active:
         raise HelperError("Interface is not active; refusing implicit activation")
     if args.command == "prepare" and active:
