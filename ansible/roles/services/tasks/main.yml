@@ -42,6 +42,15 @@
     group: "{{ omnissiah_service_user }}"
     mode: '0600'
   when: inventory_hostname in groups.magos
+- name: Ensure root-owned WireGuard configuration directory exists
+  ansible.builtin.file:
+    path: /etc/wireguard
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  when: inventory_hostname in groups.magos
+
 - name: Ensure root-owned local helper directory exists
   ansible.builtin.file:
     path: /usr/local/libexec
