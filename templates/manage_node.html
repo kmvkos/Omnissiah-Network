@@ -131,12 +131,19 @@
             </a>
             {% endif %}
 
-            <button type="button" class="btn btn-modern {% if node.vpn_status == 'online' %}btn-warning-modern{% else %}btn-accent-modern{% endif %}" 
+            {% if node.role == 'Magos' %}
+            <button type="button" class="btn btn-modern btn-outline-modern" onclick="vpnV2('identity')">Инициализировать ключ</button>
+            <button type="button" class="btn btn-modern btn-outline-modern" onclick="vpnV2('prepare')">Подготовить VPN</button>
+            <button type="button" class="btn btn-modern btn-accent-modern" onclick="vpnV2('start')">Включить VPN</button>
+            <button type="button" class="btn btn-modern btn-outline-modern" onclick="vpnV2('status')">Проверить VPN</button>
+            <div id="vpnV2Result" class="w-100 mt-2 small" role="status"></div>
+            {% else %}
+            <button type="button" class="btn btn-modern {% if node.vpn_status == 'online' %}btn-warning-modern{% else %}btn-accent-modern{% endif %}"
                     id="toggleVpnBtn" onclick="toggleVPN({{ node.id }})">
-                <i class="bi bi-{% if node.vpn_status == 'online' %}stop{% else %}play{% endif %}-circle me-2"></i>
                 {% if node.vpn_status == 'online' %}Выключить VPN{% else %}Включить VPN{% endif %}
             </button>
-            
+            {% endif %}
+
             <button type="button" class="btn btn-modern btn-accent-modern" onclick="updateSoftware({{ node.id }})">
                 <i class="bi bi-arrow-repeat me-2"></i>Обновить ПО
             </button>
@@ -216,6 +223,28 @@
 </div>
 
 <script>
+async function vpnV2(action) {
+    if (['start', 'apply'].includes(action) &&
+        !confirm('Включить тестовый VPN? Убедитесь, что подготовлены оба Magos и есть снимки ВМ.')) return;
+    const output = document.getElementById('vpnV2Result');
+    output.textContent = 'Выполняется операция: ' + action;
+    try {
+        const response = await fetch('/api/v2/vpn/mesh/operation', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(action === 'start' ? {'X-VPN-Explicit-Apply': 'ENABLE_TEST_MESH'} : {})
+            },
+            body: JSON.stringify({ node_id: {{ node.id }}, action })
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.success) throw new Error(payload.error || 'HTTP ' + response.status);
+        output.textContent = JSON.stringify(payload.result, null, 2);
+    } catch (error) {
+        output.textContent = 'Ошибка: ' + error.message;
+    }
+}
 function toggleVPN(nodeId) {
     const btn = document.getElementById('toggleVpnBtn');
     const isEnabled = btn.textContent.includes('Выключить');
