@@ -59,6 +59,42 @@ def vpn_readiness():
     return jsonify(get_readiness(load_config())), 200
 
 
+@app.route("/api/v2/vpn/control", methods=["POST"])
+def vpn_control_v2():
+    """mTLS controller-only VPN operations; no shell, sudo or private-key export."""
+    config = load_config()
+    if not config.get("mtls_required"):
+        return jsonify(error="mTLS is mandatory"), 403
+    if not config.get("vpn_control_enabled", False):
+        return jsonify(error="VPN v2 control is not enabled"), 403
+    # The existing before_request enforces controller certificate CN.
+    from proxy_identity import proxy_identity
+    if proxy_identity() != config.get("controller_name"):
+        return jsonify(error="Verified controller identity required"), 403
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or set(data) - {"action", "plan"}:
+        return jsonify(error="Invalid VPN control payload"), 400
+    action = data.get("action")
+    if action not in ("identity", "status", "prepare", "start", "apply"):
+        return jsonify(error="Unsupported VPN operation"), 400
+    plan = data.get("plan")
+    if action in ("prepare", "apply"):
+        if not isinstance(plan, dict):
+            return jsonify(error="A VPN plan is required"), 400
+        if plan.get("node_name") != config.get("name") or plan.get("address") != config.get("ip_pool"):
+            return jsonify(error="VPN plan does not match installed identity or address"), 409
+        # Must validate all peers in the restricted helper too.
+    elif plan is not None:
+        return jsonify(error="Unexpected plan"), 400
+    try:
+        from app.vpn_client import request_helper
+        result = request_helper(action, node_name=config.get("name"), plan=plan)
+        return jsonify(success=True, result=result), 200
+    except (ValueError, RuntimeError, OSError, TimeoutError) as exc:
+        current_app.logger.error("VPN v2 local helper rejected %s: %s", action, exc)
+        return jsonify(success=False, error="VPN helper failed; inspect agent journal"), 503
+
+
 @app.route('/api/v1/install_dependencies', methods=['POST'])
 def install_dependencies():
     """
