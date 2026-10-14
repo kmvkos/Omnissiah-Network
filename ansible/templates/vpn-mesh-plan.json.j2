@@ -1,0 +1,15 @@
+{
+  "node_name": {{ inventory_hostname | to_json }},
+  "address": {{ (omnissiah_vpn_address | string) | to_json }},
+  "listen_port": 51820,
+  "peers": [
+{% for peer in groups.magos if peer != inventory_hostname %}
+    {
+      "public_key": {{ hostvars[peer].vpn_public_key | to_json }},
+      "endpoint": {{ (hostvars[peer].ansible_host ~ ':51820') | to_json }},
+      "allowed_ips": [{{ (hostvars[peer].omnissiah_vpn_address.split('/')[0] ~ '/32') | to_json }}],
+      "keepalive": 25
+    }{% if not loop.last %},{% endif %}
+{% endfor %}
+  ]
+}
