@@ -1,0 +1,53 @@
+{% extends 'layout.html' %}
+{% block title %}VPN-сеть{% endblock %}
+{% block content %}
+<div class="container-fluid">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+      <h2><i class="bi bi-diagram-3 me-2"></i>VPN-сеть</h2>
+      <p class="text-muted mb-0">Omnissiah управляет узлами через mTLS. WireGuard работает напрямую между Magos.</p>
+    </div>
+    <a href="{{ url_for('dashboard') }}" class="btn btn-outline-modern">Дашборд</a>
+  </div>
+  <div class="premium-card p-4 mb-4">
+    <h5 class="mb-3">Фактическое состояние узлов</h5>
+    <p class="text-muted small">Наблюдение по аутентифицированному heartbeat, интервал обновления около 30 секунд. VPN-интерфейс и доступность пира — разные проверки.</p>
+    <div class="table-responsive">
+      <table class="table table-dark premium-table">
+        <thead><tr><th>Узел</th><th>VPN IP</th><th>Управление</th><th>mTLS</th><th>WireGuard</th><th>Peer handshake</th><th>Действия</th></tr></thead>
+        <tbody>
+        {% for item in nodes %}
+          <tr>
+            <td><strong>{{ item.node.name }}</strong></td>
+            <td><code>{{ item.node.ip_pool or '-' }}</code></td>
+            <td><span class="badge bg-{{ 'success' if item.status.service_active else 'secondary' }}">{{ 'Online' if item.status.service_active else 'Нет heartbeat' }}</span></td>
+            <td><span class="badge bg-{{ 'success' if item.status.mtls_enabled else 'secondary' }}">{{ 'Подтверждён' if item.status.mtls_enabled else 'Не подтверждён' }}</span></td>
+            <td><span class="badge bg-{{ 'success' if item.status.vpn_enabled else 'secondary' }}">{{ 'wg0 активен' if item.status.vpn_enabled else 'Выключен / нет данных' }}</span></td>
+            <td><span class="badge bg-{{ 'success' if item.status.vpn_connected else 'secondary' }}">{{ 'Есть свежий handshake' if item.status.vpn_connected else 'Нет свежего handshake' }}</span></td>
+            <td><a class="btn btn-sm btn-outline-modern" href="{{ url_for('manage_node', node_id=item.node.id) }}"><i class="bi bi-gear"></i> Управление</a></td>
+          </tr>
+        {% else %}
+          <tr><td colspan="7" class="text-center text-muted">Magos пока не зарегистрированы</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="premium-card p-4">
+    <h5 class="mb-3">Желаемые VPN-связи</h5>
+    <p class="text-muted small">Список отражает записи контроллера, а не факт прохождения трафика. Для каждого соединения проверяйте handshake на узлах.</p>
+    <div class="table-responsive">
+      <table class="table table-dark premium-table">
+        <thead><tr><th>Magos A</th><th>Magos B</th><th>Состояние</th></tr></thead>
+        <tbody>
+        {% for link in links %}
+          <tr><td>{{ link.left }}</td><td>{{ link.right }}</td><td><span class="badge bg-info">Desired</span></td></tr>
+        {% else %}
+          <tr><td colspan="3" class="text-center text-muted">Связи ещё не заданы</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
