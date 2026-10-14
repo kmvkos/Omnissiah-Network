@@ -4071,11 +4071,18 @@ def dashboard():
         magos.service_status = 'online' if observed['service_active'] else 'offline'
         magos.mtls_status = 'online' if observed['mtls_enabled'] else 'offline'
 
+    magos_by_id = {n.id: n for n in magi}
+    vpn_links = [
+        dict(left=magos_by_id[c.node1_id].name, right=magos_by_id[c.node2_id].name)
+        for c in connections
+        if c.node1_id in magos_by_id and c.node2_id in magos_by_id
+    ]
     return render_template('dashboard.html',
                            omnissiah_server=omnissiah_server,
                            magi=magi,
                            cognitors=cognitors,
                            connections=connections,
+                           vpn_links=vpn_links,
                            ip_stats=ip_stats,
                            STATUS_CHOICES=STATUS_CHOICES,
                            active_nodes=active_nodes,
