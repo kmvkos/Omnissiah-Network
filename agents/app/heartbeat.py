@@ -65,6 +65,21 @@ def get_wireguard_observation():
             "UP" in v.get("flags", []) for v in info)
         if not observed["active"]:
             return observed
+        # Query the already restricted root RPC to read handshake timestamps.
+        # A non-root agent may not be allowed to read wg show directly.
+        try:
+            from app.vpn_client import request_helper
+            cfg = load_config()
+            if cfg.get("mtls_required") and cfg.get("vpn_control_enabled"):
+                status = request_helper("status", node_name=cfg.get("name"))
+                stamps = status.get("handshakes", {})
+                if isinstance(stamps, dict):
+                    observed["peer_count"] = len(stamps)
+                    observed["latest_handshake"] = max(
+                        [int(v) for v in stamps.values() if isinstance(v, int)] or [0])
+                return observed
+        except (OSError, RuntimeError, ValueError, TimeoutError):
+            pass
         # wg show ... latest-handshakes is read-only; it may be restricted
         # on some systems. Absence of permission is not proof of no tunnel.
         handshakes = subprocess.run(
