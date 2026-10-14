@@ -199,29 +199,6 @@
 </div>
 
 <script>
-function toggleVPN(nodeId) {
-    if (confirm('Вы уверены, что хотите изменить статус VPN?')) {
-        fetch(`/api/toggle_vpn/${nodeId}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            }
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                flash(data.message || 'Статус VPN изменен', 'success');
-                setTimeout(() => window.location.reload(), 1000);
-            } else {
-                alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
-            }
-        })
-        .catch(error => {
-            alert('Ошибка: ' + error);
-        });
-    }
-}
-
 function confirmDeleteNode(nodeId) {
     if (confirm('⚠️ ВНИМАНИЕ! Вы уверены, что хотите удалить конфигурацию главного узла?\n\nЭто действие удалит:\n- Все дочерние узлы (Magos, Cognitor)\n- Все правила и настройки\n- WireGuard конфигурацию\n\nЭто действие НЕОБРАТИМО!')) {
         if (confirm('⚠️ ПОСЛЕДНЕЕ ПОДТВЕРЖДЕНИЕ!\n\nВы действительно хотите удалить конфигурацию главного узла?')) {
