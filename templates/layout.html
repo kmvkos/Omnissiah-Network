@@ -1322,7 +1322,13 @@ select.form-control-modern {
 
                 <!-- Управление сетью - показываем только если есть главная конфигурация -->
                 <div class="nav-section">
-                    <div class="nav-section-title">Управление</div>
+                    <div class="nav-section-title">VPN и управление</div>
+                    <div class="nav-item">
+                        <a href="{{ url_for('vpn_overview') }}" class="nav-link {% if request.endpoint == 'vpn_overview' %}active{% endif %}">
+                            <i class="bi bi-diagram-3"></i>
+                            <span>VPN-сеть</span>
+                        </a>
+                    </div>
                     <div class="nav-item">
                         <a href="{{ url_for('protected_objects') }}" class="nav-link {% if request.endpoint == 'protected_objects' %}active{% endif %}">
                             <i class="bi bi-shield-check"></i>
