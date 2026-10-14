@@ -271,11 +271,11 @@
                 <div class="d-flex justify-content-between mt-3 pt-3" style="border-top: 1px solid var(--border-light);">
                     <div class="text-center flex-fill">
                         <div class="text-success" style="font-size: 1.5rem; font-weight: 600;">{{ active_nodes }}</div>
-                        <div class="stat-label">Активно</div>
+                        <div class="stat-label">На связи</div>
                     </div>
                     <div class="text-center flex-fill" style="border-left: 1px solid var(--border-light);">
                         <div class="text-danger" style="font-size: 1.5rem; font-weight: 600;">{{ inactive_nodes }}</div>
-                        <div class="stat-label">Неактивно</div>
+                        <div class="stat-label">Без heartbeat / не проверено</div>
                     </div>
                 </div>
             </div>
@@ -290,8 +290,8 @@
                 <div class="stat-label">Magos узлов</div>
                 <div class="mt-3 pt-3" style="border-top: 1px solid var(--border-light);">
                     <div class="d-flex justify-content-between align-items-center">
-                        <span class="stat-label">Ретрансляторы</span>
-                        <span class="badge badge-success-modern">{{ magi|selectattr('vpn_status', 'equalto', 'online')|list|length }} онлайн</span>
+                        <span class="stat-label">Прямые VPN-узлы</span>
+                        <span class="badge badge-success-modern">{{ magi|selectattr('vpn_status', 'equalto', 'online')|list|length }} с актуальным handshake</span>
                     </div>
                 </div>
             </div>
@@ -336,7 +336,7 @@
     <div class="topology-card mb-4 fade-in">
         <h2 class="section-title">
             <i class="bi bi-diagram-3"></i>
-            Топология сети
+            Иерархия управления (mTLS)
         </h2>
 
         <div class="network-topology text-center">
@@ -357,7 +357,7 @@
                                 {{ STATUS_CHOICES[cognitor.status] if cognitor.status in STATUS_CHOICES else cognitor.status }}
                             </span>
                         </div>
-                        <div class="connection-line"></div>
+                        <div class="connection-line" title="Иерархия управления, не VPN-туннель"></div>
                     </div>
                     {% endfor %}
                 </div>
@@ -371,8 +371,8 @@
                         </div>
                         <div class="node-name" style="font-size: 1.25rem;">{{ omnissiah_server.name }}</div>
                         <div class="node-ip">{{ omnissiah_server.ip_pool }}</div>
-                        <span class="badge {% if omnissiah_server.status == 'active' %}badge-success-modern{% else %}badge-danger-modern{% endif %}">
-                            VPN: {{ STATUS_CHOICES[omnissiah_server.status] if omnissiah_server.status in STATUS_CHOICES else omnissiah_server.status }}
+                        <span class="badge badge-info-modern">
+                            Control Plane · mTLS
                         </span>
                     </div>
                 </div>
@@ -390,11 +390,11 @@
                             <div class="node-name">{{ magos.name }}</div>
                             <div class="node-ip">{{ magos.ip_pool }}</div>
                             <div class="d-flex flex-column align-items-center gap-2 mt-2">
-                                <span class="badge {% if magos.vpn_status == 'online' %}badge-success-modern{% else %}badge-danger-modern{% endif %}">
-                                    VPN: {{ 'OK' if magos.vpn_status == 'online' else 'Нет' }}
+                                <span class="badge {% if magos.vpn_status == 'online' %}badge-success-modern{% elif magos.vpn_status == 'active' %}badge-info-modern{% else %}badge-danger-modern{% endif %}">
+                                    VPN: {{ 'Peer Online' if magos.vpn_status == 'online' else 'wg0 Active' if magos.vpn_status == 'active' else 'Нет данных / Off' }}
                                 </span>
-                                <span class="badge {% if magos.service_status == 'online' %}badge-success-modern{% else %}badge-danger-modern{% endif %}">
-                                    mTLS: {{ 'OK' if magos.service_status == 'online' else 'Нет' }}
+                                <span class="badge {% if magos.mtls_status == 'online' %}badge-success-modern{% else %}badge-danger-modern{% endif %}">
+                                    mTLS: {{ 'OK' if magos.mtls_status == 'online' else 'Нет' }}
                                 </span>
                             </div>
                         </div>
@@ -430,35 +430,20 @@
         </div>
     </div>
 
-    <!-- Трафик -->
-    <div class="row g-4">
-        <div class="col-md-6">
-            <div class="traffic-card">
-                <div class="traffic-icon traffic-icon-in">
-                    <i class="bi bi-cloud-arrow-down"></i>
-                </div>
-                <h3 class="card-title-modern mb-3">Входящий трафик</h3>
-                <div class="traffic-value">{{ (omnissiah_server.total_receive if omnissiah_server else 0)|bytes_to_mb }}</div>
-                <div class="stat-label">MB</div>
-                <div class="mt-3 pt-3" style="border-top: 1px solid var(--border-light);">
-                    <small class="text-muted">Главный сервер</small>
-                </div>
-            </div>
+    <div class="premium-card p-4 mb-4">
+        <h5><i class="bi bi-arrow-left-right me-2"></i>Прямые VPN-связи</h5>
+        <p class="text-muted small">Сплошная связь между Magos — желаемая WireGuard-топология. Линии от Omnissiah показывают только mTLS-управление.</p>
+        {% if vpn_links %}
+        <div class="d-flex flex-wrap gap-2">
+            {% for link in vpn_links %}
+            <span class="badge badge-info-modern p-3">{{ link.left }} ↔ {{ link.right }} · Desired</span>
+            {% endfor %}
         </div>
-
-        <div class="col-md-6">
-            <div class="traffic-card">
-                <div class="traffic-icon traffic-icon-out">
-                    <i class="bi bi-cloud-arrow-up"></i>
-                </div>
-                <h3 class="card-title-modern mb-3">Исходящий трафик</h3>
-                <div class="traffic-value">{{ (omnissiah_server.total_sent if omnissiah_server else 0)|bytes_to_mb }}</div>
-                <div class="stat-label">MB</div>
-                <div class="mt-3 pt-3" style="border-top: 1px solid var(--border-light);">
-                    <small class="text-muted">Главный сервер</small>
-                </div>
-            </div>
-        </div>
+        {% else %}
+        <p class="text-muted">Прямые VPN-связи не заданы</p>
+        {% endif %}
+        <a class="btn btn-outline-modern mt-3" href="{{ url_for('vpn_overview') }}">Открыть VPN-сеть</a>
     </div>
+
 </div>
 {% endblock %}

@@ -1312,39 +1312,52 @@ select.form-control-modern {
                             <span>Главный узел</span>
                         </a>
                     </div>
-                    <div class="nav-item">
-                        <a href="{{ url_for('network_deployment_wizard') }}" class="nav-link {% if request.endpoint == 'network_deployment_wizard' %}active{% endif %}">
-                            <i class="bi bi-diagram-3"></i>
-                            <span>Мастер развёртывания WARP</span>
-                        </a>
-                    </div>
+
                 </div>
 
                 <!-- Управление сетью - показываем только если есть главная конфигурация -->
                 <div class="nav-section">
-                    <div class="nav-section-title">Управление</div>
+                    <div class="nav-section-title">VPN и управление</div>
+                    <div class="nav-item">
+                        <a href="{{ url_for('vpn_overview') }}" class="nav-link {% if request.endpoint == 'vpn_overview' %}active{% endif %}">
+                            <i class="bi bi-diagram-3"></i>
+                            <span>VPN-сеть</span>
+                        </a>
+                    </div>
+
+
+
+                </div>
+                {% endif %}
+
+                <div class="nav-section">
+                    <div class="nav-section-title">Устаревшие модули</div>
+                    <div class="nav-item">
+                        <a href="{{ url_for('network_deployment_wizard') }}" class="nav-link {% if request.endpoint == 'network_deployment_wizard' %}active{% endif %}">
+                            <i class="bi bi-diagram-3"></i>
+                            <span>Мастер развёртывания (legacy)</span>
+                        </a>
+                    </div>
                     <div class="nav-item">
                         <a href="{{ url_for('protected_objects') }}" class="nav-link {% if request.endpoint == 'protected_objects' %}active{% endif %}">
                             <i class="bi bi-shield-check"></i>
-                            <span>Защищенные объекты</span>
+                            <span>Защищённые объекты (legacy)</span>
                         </a>
                     </div>
                     <div class="nav-item">
                         <a href="{{ url_for('access_policy') }}" class="nav-link {% if request.endpoint == 'access_policy' %}active{% endif %}">
                             <i class="bi bi-file-earmark-lock"></i>
-                            <span>Политика доступа</span>
+                            <span>Политика доступа (legacy)</span>
                         </a>
                     </div>
                     <div class="nav-item">
                         <a href="{{ url_for('traffic_log') }}" class="nav-link {% if request.endpoint == 'traffic_log' %}active{% endif %}">
                             <i class="bi bi-file-earmark-text"></i>
-                            <span>Журнал трафика</span>
+                            <span>Журнал трафика (legacy)</span>
                         </a>
                     </div>
                 </div>
-                {% endif %}
-
-                <!-- Аккаунт -->
+                                <!-- Аккаунт -->
                 <div class="nav-section">
                     <div class="nav-section-title">Аккаунт</div>
                     <div class="nav-item">

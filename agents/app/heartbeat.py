@@ -51,24 +51,52 @@ def get_interfaces_with_ips():
         print(f"[heartbeat] Ошибка получения интерфейсов: {e}")
         return []
 
-def check_wireguard_status(node_name):
-    """
-    Проверяет статус WireGuard интерфейса
-    
-    Returns:
-        bool: True если интерфейс активен, False если нет
-    """
+def get_wireguard_observation():
+    """Inspect actual kernel WireGuard state without sudo or private keys."""
+    observed = {"interface": "wg0", "active": False, "latest_handshake": 0, "peer_count": 0}
     try:
-        result = subprocess.run(
-            ['sudo', '-n', 'wg', 'show', node_name],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        return result.returncode == 0
-    except Exception as e:
-        print(f"[heartbeat] Ошибка проверки WireGuard статуса: {e}")
-        return False
+        link = subprocess.run(["ip", "-j", "-d", "link", "show", "dev", "wg0"],
+                              capture_output=True, text=True, timeout=4)
+        if link.returncode:
+            return observed
+        info = json.loads(link.stdout or "[]")
+        observed["active"] = any(
+            v.get("linkinfo", {}).get("info_kind") == "wireguard" and
+            "UP" in v.get("flags", []) for v in info)
+        if not observed["active"]:
+            return observed
+        # Query the already restricted root RPC to read handshake timestamps.
+        # A non-root agent may not be allowed to read wg show directly.
+        try:
+            from app.vpn_client import request_helper
+            cfg = load_config()
+            if cfg.get("mtls_required") and cfg.get("vpn_control_enabled"):
+                status = request_helper("status", node_name=cfg.get("name"))
+                stamps = status.get("handshakes", {})
+                if isinstance(stamps, dict):
+                    observed["peer_count"] = len(stamps)
+                    observed["latest_handshake"] = max(
+                        [int(v) for v in stamps.values() if isinstance(v, int)] or [0])
+                return observed
+        except (OSError, RuntimeError, ValueError, TimeoutError):
+            pass
+        # wg show ... latest-handshakes is read-only; it may be restricted
+        # on some systems. Absence of permission is not proof of no tunnel.
+        handshakes = subprocess.run(
+            ["wg", "show", "wg0", "latest-handshakes"],
+            capture_output=True, text=True, timeout=4)
+        if handshakes.returncode == 0:
+            for entry in handshakes.stdout.splitlines():
+                fields = entry.split()
+                if len(fields) == 2 and fields[1].isdigit():
+                    observed["peer_count"] += 1
+                    observed["latest_handshake"] = max(
+                        observed["latest_handshake"], int(fields[1]))
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        pass
+    return observed
+
+
 
 def send_heartbeat(config):
     import sys
@@ -94,8 +122,8 @@ def send_heartbeat(config):
         log(f"[heartbeat] ❌ node_name не найден в конфигурации. Доступные ключи: {list(config.keys())}")
         return False
     
-    wireguard_enabled = (check_wireguard_status(node_name)
-                         if node_name and config.get('manage_wireguard', True) else False)
+    vpn_observed = get_wireguard_observation()
+    wireguard_enabled = vpn_observed["active"]
 
     data = {
         'public_key': config.get('public_key', ''),
@@ -104,7 +132,9 @@ def send_heartbeat(config):
         'status': 'active',
         'clients': [],  # позже заполним, пока пусть будет пусто
         'interfaces': interfaces,  # Список интерфейсов с IP адресами
-        'wireguard_enabled': wireguard_enabled  # Статус WireGuard интерфейса
+        'wireguard_enabled': wireguard_enabled,
+        'vpn_last_handshake': vpn_observed["latest_handshake"],
+        'vpn_peer_count': vpn_observed["peer_count"]
     }
     
     log(f"[heartbeat] 📤 Данные: name={node_name}, local_ip={data.get('local_ip')}, wireguard_enabled={wireguard_enabled}")

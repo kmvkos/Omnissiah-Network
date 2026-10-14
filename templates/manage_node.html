@@ -104,8 +104,8 @@
             <tr>
                 <td>Статус VPN:</td>
                 <td>
-                    <span class="badge {% if node.status == 'active' %}badge-success-modern{% else %}badge-danger-modern{% endif %}">
-                        {{ STATUS_CHOICES[node.status] if node.status in STATUS_CHOICES else node.status }}
+                    <span class="badge {% if observed_vpn.vpn_connected %}badge-success-modern{% elif observed_vpn.vpn_enabled %}badge-info-modern{% else %}badge-danger-modern{% endif %}">
+                        {{ 'Peer online' if observed_vpn.vpn_connected else 'wg0 активен · handshake не подтверждён' if observed_vpn.vpn_enabled else 'wg0 не активен / нет данных' }}
                     </span>
                 </td>
             </tr>
@@ -123,6 +123,7 @@
         <h3 class="card-title-modern mb-3">
             <i class="bi bi-tools me-2"></i>Действия
         </h3>
+        <p class="text-muted small">Агент: {{ 'Online' if observed_vpn.service_active else 'Offline' }} · mTLS: {{ 'Подтверждён' if observed_vpn.mtls_enabled else 'Не подтверждён' }} · VPN: {{ 'Peer online' if observed_vpn.vpn_connected else 'wg0 активен' if observed_vpn.vpn_enabled else 'не активен / нет данных' }}. Статус обновляется через heartbeat.</p>
         
         <div class="action-buttons">
             {% if node.role == 'Magos' %}
@@ -134,7 +135,7 @@
             {% if node.role == 'Magos' %}
             <button type="button" class="btn btn-modern btn-outline-modern" onclick="vpnV2('identity')">Инициализировать ключ</button>
             <button type="button" class="btn btn-modern btn-outline-modern" onclick="vpnV2('prepare')">Подготовить VPN</button>
-            <button type="button" class="btn btn-modern btn-accent-modern" onclick="vpnV2('start')">Включить VPN</button>
+            <button type="button" class="btn btn-modern btn-accent-modern" onclick="vpnV2('start')">Запустить VPN (если выключен)</button>
             <button type="button" class="btn btn-modern btn-outline-modern" onclick="vpnV2('status')">Проверить VPN</button>
             <div id="vpnV2Result" class="w-100 mt-2 small" role="status"></div>
             {% else %}

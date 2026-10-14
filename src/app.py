@@ -3159,6 +3159,23 @@ def preview_vpn_mesh():
     return jsonify({'ready': True, 'plans': plans, 'applied': False}), 200
 
 
+@app.route('/vpn/overview')
+@login_required
+@require_omnissiah
+def vpn_overview():
+    """Dashboard for observed Magos VPN and explicitly desired topology."""
+    from management_status import peer_status
+    magi = General.query.filter_by(role='Magos').order_by(General.name).all()
+    by_id = {n.id: n for n in magi}
+    observations = [dict(node=n, status=peer_status(n)) for n in magi]
+    links = []
+    for edge in NodeConnection.query.all():
+        left, right = by_id.get(edge.node1_id), by_id.get(edge.node2_id)
+        if left is not None and right is not None:
+            links.append(dict(left=left.name, right=right.name))
+    return render_template('vpn_overview.html', nodes=observations, links=links)
+
+
 @app.route('/manage_connections/<int:node_id>', methods=['GET', 'POST'])
 @login_required
 @admin_required
@@ -4031,8 +4048,12 @@ def dashboard():
     cognitors = General.query.filter_by(role='Cognitor').all()
 
     all_nodes = [omnissiah_server] + magi + cognitors if omnissiah_server else magi + cognitors
-    active_nodes = sum(1 for node in all_nodes if node and node.status == 'active')
-    inactive_nodes = sum(1 for node in all_nodes if node and node.status != 'active')
+    # Dashboard counts reflect observed management reachability, not
+    # the legacy VPN activation flag on the control-plane server.
+    from management_status import recent
+    active_nodes = (1 if omnissiah_server else 0) + sum(
+        1 for node in magi if recent(node.last_heartbeat, 90))
+    inactive_nodes = len(all_nodes) - active_nodes
 
     connections = NodeConnection.query.all()
 
@@ -4040,42 +4061,28 @@ def dashboard():
     if omnissiah_server:
         ip_stats = calculate_ip_ranges(omnissiah_server.ip_pool, omnissiah_server)
 
-    # 🔍 Сетевой статус через wg
-    now = datetime.now(timezone.utc)
-    wg_data = {}
-    try:
-        wg_output = subprocess.run(["wg", "show", "all", "dump"],
-                                   capture_output=True, text=True, check=True)
-        for line in wg_output.stdout.strip().splitlines():
-            parts = line.split()
-            if len(parts) >= 6:
-                allowed_ip = parts[4].split('/')[0]
-                latest_handshake = int(parts[5])
-                wg_data[allowed_ip] = latest_handshake
-    except Exception as e:
-        app.logger.debug(f"wg dump error: {e}")
-
+    # VPN exists only on Magos: use the last authenticated observed heartbeat,
+    # never try to inspect the controller's local wg interface.
+    from management_status import peer_status
     for magos in magi:
-        magos_ip = magos.ip_pool.split("/")[0]
-        handshake_ts = wg_data.get(magos_ip, 0)
-        vpn_alive = (int(now.timestamp()) - handshake_ts) < 180
+        observed = peer_status(magos)
+        magos.vpn_status = 'online' if observed['vpn_connected'] else (
+            'active' if observed['vpn_enabled'] else 'offline')
+        magos.service_status = 'online' if observed['service_active'] else 'offline'
+        magos.mtls_status = 'online' if observed['mtls_enabled'] else 'offline'
 
-        if magos.last_heartbeat:
-            hb = magos.last_heartbeat
-            if hb.tzinfo is None:
-                hb = hb.replace(tzinfo=timezone.utc)
-            hb_alive = (now - hb) < timedelta(seconds=90)
-        else:
-            hb_alive = False
-
-        magos.vpn_status = 'online' if vpn_alive else 'offline'
-        magos.service_status = 'online' if hb_alive else 'offline'
-
+    magos_by_id = {n.id: n for n in magi}
+    vpn_links = [
+        dict(left=magos_by_id[c.node1_id].name, right=magos_by_id[c.node2_id].name)
+        for c in connections
+        if c.node1_id in magos_by_id and c.node2_id in magos_by_id
+    ]
     return render_template('dashboard.html',
                            omnissiah_server=omnissiah_server,
                            magi=magi,
                            cognitors=cognitors,
                            connections=connections,
+                           vpn_links=vpn_links,
                            ip_stats=ip_stats,
                            STATUS_CHOICES=STATUS_CHOICES,
                            active_nodes=active_nodes,
@@ -4886,7 +4893,8 @@ def main_node(node_id=None):
         
         from management_status import peer_status
         observed = peer_status(peer)
-        peer.vpn_status_display = 'online' if observed['vpn_connected'] else 'offline'
+        peer.vpn_status_display = ('online' if observed['vpn_connected'] else
+                                   'active' if observed['vpn_enabled'] else 'offline')
         peer.mtls_status_display = 'online' if observed['mtls_enabled'] else 'offline'
         peer.management_status_display = 'online' if observed['service_active'] else 'offline'
 
@@ -5001,11 +5009,15 @@ def manage_node(node_id):
         
         from management_status import peer_status
         observed = peer_status(peer)
-        peer.vpn_status_display = 'online' if observed['vpn_connected'] else 'offline'
+        peer.vpn_status_display = ('online' if observed['vpn_connected'] else
+                                   'active' if observed['vpn_enabled'] else 'offline')
         peer.mtls_status_display = 'online' if observed['mtls_enabled'] else 'offline'
         peer.management_status_display = 'online' if observed['service_active'] else 'offline'
 
+    from management_status import peer_status
+    observed_vpn = peer_status(node)
     return render_template('manage_node.html',
+                           observed_vpn=observed_vpn,
                            node=node,
                            parent=parent,
                            omnissiah=omnissiah,
