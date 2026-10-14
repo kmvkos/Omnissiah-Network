@@ -107,7 +107,7 @@ def ensure_keys(state):
 
 
 def render(data, private_key):
-    lines = ["[Interface]", "PrivateKey = " + private_key,
+    lines = ["# Managed by Omnissiah VPN v2", "[Interface]", "PrivateKey = " + private_key,
              "Address = " + data["address"], "ListenPort = " + str(data["listen_port"])]
     for p in data["peers"]:
         lines.extend(["", "[Peer]", "PublicKey = " + p["public_key"],
@@ -146,7 +146,7 @@ def main():
         return
     if args.command == "start":
         config_file = WG_DIR / "wg0.conf"
-        if not config_file.is_file() or config_file.is_symlink():
+        if not config_file.is_file() or config_file.is_symlink() or not config_file.read_text().startswith("# Managed by Omnissiah VPN v2\\n"):
             raise HelperError("No prepared configuration")
         if subprocess.run(["wg", "show", IFACE], capture_output=True).returncode == 0:
             print(json.dumps({"active": True, "changed": False}))
@@ -180,6 +180,10 @@ def main():
     secret = STATE / "private.key"
     if not secret.is_file() or secret.is_symlink():
         raise HelperError("Identity must be initialized before apply")
+    stored_config = WG_DIR / "wg0.conf"
+    if stored_config.exists():
+        if stored_config.is_symlink() or not stored_config.is_file() or not stored_config.read_text().startswith("# Managed by Omnissiah VPN v2\\n"):
+            raise HelperError("Refusing to overwrite a configuration not owned by VPN v2")
     active = subprocess.run(["wg", "show", IFACE], capture_output=True).returncode == 0
     if args.command == "apply" and not active:
         raise HelperError("Interface is not active; refusing implicit activation")
@@ -195,10 +199,16 @@ def main():
         # wg-quick strip removes Address/other wg-quick-only settings.
         stripped = run(["wg-quick", "strip", str(tmp)])
         if args.command == "apply":
-            # Do not overwrite persistent state if kernel application fails.
-            run(["wg", "syncconf", IFACE, "/dev/stdin"], input=stripped)
-        # Atomic persistent write, even for the preparation-only phase.
-        tmp.replace(WG_DIR / "wg0.conf")
+            previous = run(["wg", "showconf", IFACE])
+            try:
+                run(["wg", "syncconf", IFACE, "/dev/stdin"], input=stripped)
+                tmp.replace(WG_DIR / "wg0.conf")
+            except Exception:
+                # Reconcile kernel peers back to the last observed configuration.
+                run(["wg", "syncconf", IFACE, "/dev/stdin"], input=previous)
+                raise
+        else:
+            tmp.replace(WG_DIR / "wg0.conf")
     finally:
         tmp.unlink(missing_ok=True)
     print(json.dumps({"action": args.command, "changed": True, "peers": len(data["peers"])}))
