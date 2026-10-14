@@ -57,3 +57,21 @@ def test_rejects_non_host_address():
     p["address"] = "10.77.0.0/24"
     with pytest.raises(mod.HelperError):
         mod.validate_plan(p, "magos01")
+
+
+def test_prepared_config_header_allows_explicit_start(monkeypatch, tmp_path, capsys):
+    """Regression: header check must match a real newline, not literal backslash-n."""
+    cfg = tmp_path / "wg0.conf"
+    cfg.write_text("# Managed by Omnissiah VPN v2\n[Interface]\n")
+    monkeypatch.setattr(mod, "WG_DIR", tmp_path)
+    monkeypatch.setattr(mod.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(sys, "argv", ["vpn_helper", "start", "--node-name", "magos01"])
+    class Missing:
+        returncode = 1
+    monkeypatch.setattr(mod.subprocess, "run", lambda *a, **kw: Missing())
+    executed = []
+    monkeypatch.setattr(mod, "run", lambda argv, **kw: executed.append(argv) or "")
+    mod.main()
+    assert ["wg-quick", "up", "wg0"] in executed
+    assert ["systemctl", "enable", "wg-quick@wg0.service"] in executed
+    assert '"active": true' in capsys.readouterr().out.lower()
