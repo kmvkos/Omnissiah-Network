@@ -132,7 +132,17 @@ def main():
         return
     if args.command == "status":
         exists = subprocess.run(["ip", "link", "show", "dev", IFACE], capture_output=True).returncode == 0
-        print(json.dumps({"interface": IFACE, "active": exists}))
+        handshakes = {}
+        if exists:
+            output = run(["wg", "show", IFACE, "latest-handshakes"])
+            for line in output.splitlines():
+                fields = line.split()
+                if len(fields) == 2:
+                    try:
+                        handshakes[fields[0]] = int(fields[1])
+                    except ValueError:
+                        pass
+        print(json.dumps({"interface": IFACE, "active": exists, "handshakes": handshakes}))
         return
     if args.command == "start":
         config_file = WG_DIR / "wg0.conf"
@@ -146,7 +156,13 @@ def main():
         except HelperError:
             # wg-quick tries its own rollback; do not change the management route.
             raise
-        print(json.dumps({"active": True, "changed": True}))
+        # Persist only after explicit, successful start.
+        try:
+            run(["systemctl", "enable", "wg-quick@wg0.service"])
+        except HelperError:
+            run(["wg-quick", "down", IFACE])
+            raise
+        print(json.dumps({"active": True, "changed": True, "boot_enabled": True}))
         return
     if not args.plan:
         parser.error("--plan required")
