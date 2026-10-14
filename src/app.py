@@ -4986,7 +4986,10 @@ def manage_node(node_id):
         peer.mtls_status_display = 'online' if observed['mtls_enabled'] else 'offline'
         peer.management_status_display = 'online' if observed['service_active'] else 'offline'
 
+    from management_status import peer_status
+    observed_vpn = peer_status(node)
     return render_template('manage_node.html',
+                           observed_vpn=observed_vpn,
                            node=node,
                            parent=parent,
                            omnissiah=omnissiah,
