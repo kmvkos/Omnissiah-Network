@@ -1,0 +1,82 @@
+---
+# Explicit, deliberately separate first-time Magos mesh experiment.
+# Not imported into site.yml, not run by control-update.sh.
+- name: Prepare direct Magos VPN mesh without activation
+  hosts: magos
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Require /32 Magos addresses and at least two peers
+      ansible.builtin.assert:
+        that:
+          - groups.magos | length >= 2
+          - omnissiah_vpn_address.endswith('/32')
+          - ansible_host is defined
+          - not (omnissiah_vpn_activate | default(false) | bool) or (omnissiah_vpn_explicit_ack | default('')) == 'ENABLE_TEST_MESH'
+        fail_msg: "Need at least two Magos, /32 addresses and explicit ENABLE_TEST_MESH acknowledgment before activation"
+    - name: Ensure privileged helper is installed
+      ansible.builtin.stat:
+        path: /usr/local/libexec/omnissiah-vpn-helper
+      register: vpn_helper_stat
+    - ansible.builtin.assert:
+        that:
+          - vpn_helper_stat.stat.exists
+          - vpn_helper_stat.stat.pw_name == 'root'
+        fail_msg: "Deploy this reviewed branch before testing the VPN"
+    - name: Initialize persistent private WireGuard identity locally
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, /usr/local/libexec/omnissiah-vpn-helper, identity, --node-name, "{{ inventory_hostname }}"]
+      register: vpn_identity
+      changed_when: false
+      no_log: true
+    - name: Share public identity between inventory hosts only
+      ansible.builtin.set_fact:
+        vpn_public_key: "{{ (vpn_identity.stdout | from_json).public_key }}"
+    - name: Create root-owned VPN state directory
+      ansible.builtin.file:
+        path: /var/lib/omnissiah-network/vpn
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+    - name: Render a root-owned stage plan from Magos-only inventory
+      ansible.builtin.template:
+        src: templates/vpn-mesh-plan.json.j2
+        dest: /var/lib/omnissiah-network/vpn/mesh-plan.json
+        owner: root
+        group: root
+        mode: '0600'
+    - name: Validate full peer set on Magos
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, /usr/local/libexec/omnissiah-vpn-helper, validate, --node-name, "{{ inventory_hostname }}", --plan, /var/lib/omnissiah-network/vpn/mesh-plan.json]
+      changed_when: false
+    - name: Prepare persistent WireGuard config but do not start
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, /usr/local/libexec/omnissiah-vpn-helper, prepare, --node-name, "{{ inventory_hostname }}", --plan, /var/lib/omnissiah-network/vpn/mesh-plan.json]
+      when: not (omnissiah_vpn_activate | default(false) | bool)
+      no_log: true
+    - name: Activate prepared mesh only when explicitly requested
+      when: omnissiah_vpn_activate | default(false) | bool
+      block:
+        - name: Ensure no existing WireGuard interface is present
+          ansible.builtin.command: /usr/bin/wg show wg0
+          register: existing_wg0
+          changed_when: false
+          failed_when: existing_wg0.rc == 0
+        - name: Prepare persistent config after validation
+          ansible.builtin.command:
+            argv: [/usr/bin/python3, /usr/local/libexec/omnissiah-vpn-helper, prepare, --node-name, "{{ inventory_hostname }}", --plan, /var/lib/omnissiah-network/vpn/mesh-plan.json]
+          no_log: true
+        - name: Start WireGuard without adding default routes
+          ansible.builtin.command:
+            argv: [/usr/bin/python3, /usr/local/libexec/omnissiah-vpn-helper, start, --node-name, "{{ inventory_hostname }}"]
+          register: vpn_started
+          changed_when: (vpn_started.stdout | from_json).changed
+        - name: Read interface state
+          ansible.builtin.command: /usr/bin/wg show wg0 latest-handshakes
+          register: vpn_handshake
+          changed_when: false
+        - name: Report handshake observation
+          ansible.builtin.debug:
+            msg: "{{ inventory_hostname }}: interface started; handshake data available (a fresh handshake still requires traffic)"

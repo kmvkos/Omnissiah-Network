@@ -42,6 +42,72 @@
     group: "{{ omnissiah_service_user }}"
     mode: '0600'
   when: inventory_hostname in groups.magos
+- name: Ensure root-owned WireGuard configuration directory exists
+  ansible.builtin.file:
+    path: /etc/wireguard
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  when: inventory_hostname in groups.magos
+
+- name: Ensure root-owned local helper directory exists
+  ansible.builtin.file:
+    path: /usr/local/libexec
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when: inventory_hostname in groups.magos
+
+- name: Stage the restricted VPN helper on Magos without enabling execution by the application
+  ansible.builtin.copy:
+    src: "{{ omnissiah_project_dir }}/deploy/vpn_helper.py"
+    dest: /usr/local/libexec/omnissiah-vpn-helper
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0700'
+  when: inventory_hostname in groups.magos
+
+- name: Install restricted VPN RPC server on Magos
+  ansible.builtin.copy:
+    src: "{{ omnissiah_project_dir }}/deploy/vpn_rpc.py"
+    dest: /usr/local/libexec/omnissiah-vpn-rpc
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0700'
+  when: inventory_hostname in groups.magos
+  notify: Restart VPN RPC
+
+- name: Install Magos VPN socket unit
+  ansible.builtin.template:
+    src: vpn-rpc.socket.j2
+    dest: /etc/systemd/system/omnissiah-vpn-rpc.socket
+    owner: root
+    group: root
+    mode: '0644'
+  when: inventory_hostname in groups.magos
+
+- name: Install Magos VPN root service unit
+  ansible.builtin.template:
+    src: vpn-rpc.service.j2
+    dest: /etc/systemd/system/omnissiah-vpn-rpc.service
+    owner: root
+    group: root
+    mode: '0644'
+  when: inventory_hostname in groups.magos
+  notify: Restart VPN RPC
+
+- name: Enable local Magos RPC socket without enabling VPN interface
+  ansible.builtin.systemd_service:
+    name: omnissiah-vpn-rpc.socket
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: inventory_hostname in groups.magos
+
 - name: Install the application service
   ansible.builtin.template:
     src: application.service.j2

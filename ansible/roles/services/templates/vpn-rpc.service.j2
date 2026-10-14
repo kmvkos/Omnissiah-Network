@@ -1,0 +1,22 @@
+[Unit]
+Description=Omnissiah restricted VPN RPC service
+Requires=omnissiah-vpn-rpc.socket
+After=omnissiah-vpn-rpc.socket
+
+[Service]
+Type=simple
+User=root
+Group=root
+Environment="OMNISSIAH_NODE_NAME={{ inventory_hostname }}"
+ExecStart=/usr/bin/python3 /usr/local/libexec/omnissiah-vpn-rpc
+Restart=on-failure
+RestartSec=2
+UMask=0077
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/etc/wireguard /var/lib/omnissiah-network
+
+[Install]
+WantedBy=multi-user.target

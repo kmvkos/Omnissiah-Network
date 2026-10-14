@@ -8,3 +8,10 @@
   ansible.builtin.systemd_service:
     name: nginx
     state: reloaded
+
+- name: Restart VPN RPC
+  ansible.builtin.systemd_service:
+    name: omnissiah-vpn-rpc.service
+    daemon_reload: true
+    state: restarted
+  when: inventory_hostname in groups.magos

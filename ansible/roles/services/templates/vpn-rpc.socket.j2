@@ -1,0 +1,13 @@
+[Unit]
+Description=Omnissiah VPN local RPC socket
+
+[Socket]
+ListenStream=/run/omnissiah-vpn/control.sock
+SocketUser=root
+SocketGroup={{ omnissiah_service_user }}
+SocketMode=0660
+DirectoryMode=0755
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

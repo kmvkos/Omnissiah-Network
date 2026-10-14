@@ -3055,161 +3055,173 @@ def encrypt_wg_config(config_content):
     encrypted = cipher.encrypt(config_content.encode('utf-8'))
     return encrypted
 
+def _vpn_v2_send(node, action, plan=None):
+    """Use Omnissiah's node certificate and CA for managed mTLS."""
+    from urllib.parse import urlsplit
+    controller = General.query.filter_by(role='Omnissiah').first()
+    if not controller or not node or node.role != "Magos":
+        raise ValueError("Magos and controller are required")
+    import ipaddress
+    host = str(ipaddress.IPv4Address(node.endpoint))
+    # Management nginx port is configured identically on controller and agents.
+    port = int(controller.nginx_https_port)
+    cert = "/var/lib/omnissiah-network/pki/identity.crt"
+    key = "/var/lib/omnissiah-network/pki/identity.key"
+    ca = "/var/lib/omnissiah-network/pki/ca.crt"
+    if not all(Path(p).is_file() for p in (cert, key, ca)):
+        raise ValueError("Omnissiah management identity not installed")
+    payload = {"action": action}
+    if plan is not None:
+        payload["plan"] = plan
+    response = requests.post(
+        f"https://{host}:{port}/api/v2/vpn/control",
+        cert=(cert, key), verify=ca, json=payload, timeout=65)
+    response.raise_for_status()
+    reply = response.json()
+    if not reply.get("success"):
+        raise ValueError("Magos reported a failed operation")
+    return reply["result"]
+
+
+@app.route('/api/v2/vpn/mesh/operation', methods=['POST'])
+@login_required
+@admin_required
+@require_omnissiah
+def vpn_mesh_operation():
+    """Explicit VPN operation. Never triggered from 'save connections'."""
+    from vpn_topology import project_magos_mesh
+    from vpn_plan import VPNPlanError
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or set(body) != {"node_id", "action"}:
+        return jsonify(error="Expected node_id and action"), 400
+    action = body["action"]
+    if action not in ("identity", "status", "prepare", "start", "apply"):
+        return jsonify(error="Unsupported operation"), 400
+    if type(body["node_id"]) is not int:
+        return jsonify(error="Invalid node ID"), 400
+    node = db.session.get(General, body["node_id"])
+    if not node or node.role != "Magos":
+        return jsonify(error="Magos not found"), 404
+    if action in ("start", "apply") and request.headers.get("X-VPN-Explicit-Apply") != "ENABLE_TEST_MESH":
+        return jsonify(error="Explicit lab activation acknowledgement required"), 409
+    try:
+        plan = None
+        if action in ("prepare", "apply"):
+            projected = project_magos_mesh(General.query.filter_by(role="Magos").all(),
+                                            NodeConnection.query.all())
+            selected = next(p for p in projected if p["node_id"] == node.id)
+            # Agent expects the exact strict schema, excluding UI-only peer names.
+            plan = {"node_name": selected["node_name"], "address": selected["address"],
+                    "listen_port": selected["listen_port"],
+                    "peers": [{k: peer[k] for k in ("public_key", "endpoint", "allowed_ips", "keepalive")}
+                              for peer in selected["peers"]]}
+            if not plan["peers"]:
+                return jsonify(error="No explicit Magos links configured"), 409
+        result = _vpn_v2_send(node, action, plan)
+        if action == "identity":
+            new_key = result.get("public_key")
+            if not isinstance(new_key, str):
+                raise ValueError("Invalid Magos public identity")
+            import base64, binascii
+            try:
+                if len(base64.b64decode(new_key, validate=True)) != 32:
+                    raise ValueError("Invalid public key length")
+            except (binascii.Error, ValueError) as exc:
+                raise ValueError("Invalid public key") from exc
+            if node.public_key and node.public_key != new_key:
+                return jsonify(error="Key differs from registered identity; explicit rotation required"), 409
+            node.public_key = new_key
+            db.session.commit()
+        return jsonify(success=True, action=action, node=node.name, result=result), 200
+    except (ValueError, VPNPlanError, StopIteration) as exc:
+        db.session.rollback()
+        return jsonify(error=str(exc)), 409
+    except (requests.RequestException, OSError, KeyError) as exc:
+        db.session.rollback()
+        app.logger.error("VPN v2 %s failed for %s: %s", action, node.name, exc)
+        return jsonify(error="VPN control call failed; check service and TLS logs"), 502
+
+
+@app.route('/api/v2/vpn/mesh/preview', methods=['GET'])
+@login_required
+@admin_required
+@require_omnissiah
+def preview_vpn_mesh():
+    """Read-only, authenticated plan; does not activate any VPN interface."""
+    from vpn_topology import project_magos_mesh
+    from vpn_plan import VPNPlanError
+    magos_nodes = General.query.filter_by(role='Magos').all()
+    edges = NodeConnection.query.all()
+    try:
+        plans = project_magos_mesh(magos_nodes, edges)
+    except VPNPlanError as exc:
+        return jsonify({'ready': False, 'error': str(exc)}), 409
+    return jsonify({'ready': True, 'plans': plans, 'applied': False}), 200
+
+
 @app.route('/manage_connections/<int:node_id>', methods=['GET', 'POST'])
 @login_required
 @admin_required
 @require_omnissiah
 def manage_connections(node_id):
+    """Save explicit desired Magos mesh edges; never apply VPN implicitly."""
     node = db.session.get(General, node_id)
-    if not node or node.role == 'Cognitor':
+    if not node or node.role != 'Magos':
         abort(404)
-
-    if request.method == 'POST':
-        try:
-            # Сохраняем список узлов до изменений для отслеживания что изменилось
-            old_connections = set()
-            for conn in node.connections_as_node1 + node.connections_as_node2:
-                other_id = conn.node2_id if conn.node1_id == node.id else conn.node1_id
-                old_connections.add(other_id)
-            
-            # Удаляем существующие связи
-            NodeConnection.query.filter(
-                (NodeConnection.node1_id == node_id) |
-                (NodeConnection.node2_id == node_id)
-            ).delete()
-            
-            new_connections = set()
-            # Добавляем новые связи
-            for other_node_id in request.form.getlist('connections'):
-                other_node_id = int(other_node_id)
-                other_node = db.session.get(General, other_node_id)
-                if not other_node or other_node.role == 'Cognitor':
-                    continue
-                
-                new_connections.add(other_node_id)
-
-                # Сортируем ID для избежания дубликатов
-                node1, node2 = sorted([node.id, other_node_id])
-                connection = NodeConnection(
-                    node1_id=node1,
-                    node2_id=node2,
-                    description=f"{node.name} ↔ {other_node.name}"
-                )
-                db.session.add(connection)
-            
-            db.session.commit()
-            
-            # Отправляем обновленные конфигурации всем затронутым узлам
-            all_affected_nodes = {node_id} | new_connections | old_connections
-            updated_nodes = []
-            failed_nodes = []
-            
-            for affected_node_id in all_affected_nodes:
-                if affected_node_id == node_id:
-                    affected_node = node
-                else:
-                    affected_node = db.session.get(General, affected_node_id)
-                
-                if not affected_node or affected_node.role == 'Cognitor':
-                    continue
-                
-                # Проверяем что узел онлайн (по last_heartbeat для Magos)
-                if affected_node.role == 'Magos':
-                    if not affected_node.last_heartbeat:
-                        failed_nodes.append((affected_node.name, "Узел офлайн"))
-                        continue
-                    
-                    # Проверяем что прошло не более 90 секунд с последнего heartbeat
-                    from datetime import datetime, timezone, timedelta
-                    if (datetime.now(timezone.utc) - affected_node.last_heartbeat.replace(tzinfo=timezone.utc) if affected_node.last_heartbeat.tzinfo is None else affected_node.last_heartbeat) > timedelta(seconds=90):
-                        failed_nodes.append((affected_node.name, "Узел офлайн"))
-                        continue
-                
-                # Генерируем новую конфигурацию
-                try:
-                    new_config = generate_wg_config_with_connections(affected_node)
-                    encrypted_config = encrypt_wg_config(new_config)
-                    
-                    # Отправляем конфигурацию на узел через API
-                    if affected_node.role == 'Magos':
-                        # Используем специальный endpoint для обновления конфигурации
-                        api_url = get_api_url(affected_node, endpoint="/api/magos/update_config", default_port=5001, use_ip=True)
-                        
-                        # Подготавливаем данные
-                        import base64
-                        encrypted_b64 = base64.b64encode(encrypted_config).decode('utf-8')
-                        
-                        payload = {
-                            'config': encrypted_b64,
-                            'node_name': affected_node.name,
-                            'timestamp': datetime.now(timezone.utc).isoformat()
-                        }
-                        
-                        # Отправляем через mTLS (если настроено) или обычный HTTPS/HTTP
-                        # Omnissiah не имеет клиентского сертификата для mTLS к Magos
-                        # Поэтому отправляем обычным HTTP/HTTPS, а проверка подлинности
-                        # будет через mTLS на стороне Magos (Nginx проверит клиентский сертификат)
-                        # ВАЖНО: Nginx требует mTLS для /api/magos/, но Omnissiah отправляет как обычный клиент
-                        # Поэтому нужно либо настроить отдельный endpoint без mTLS проверки,
-                        # либо использовать другой подход
-                        
-                        # Для отправки конфигурации используем endpoint который НЕ требует mTLS
-                        # или временно отключаем проверку для этого endpoint
-                        verify_ssl = affected_node.nginx_cert_type != 'self-signed' if affected_node.nginx_enabled else True
-                        
-                        try:
-                            import requests
-                            # Отправляем обычным HTTPS/HTTP запросом
-                            # Magos должен проверить подлинность через другой механизм (подпись, токен и т.д.)
-                            response = requests.post(
-                                api_url,
-                                json=payload,
-                                timeout=30,
-                                verify=verify_ssl if affected_node.nginx_enabled else False
-                            )
-                            
-                            if response.status_code == 200:
-                                result = response.json()
-                                if result.get('success'):
-                                    updated_nodes.append(affected_node.name)
-                                else:
-                                    failed_nodes.append((affected_node.name, result.get('error', 'Неизвестная ошибка')))
-                            else:
-                                failed_nodes.append((affected_node.name, f"HTTP {response.status_code}"))
-                        except Exception as e:
-                            failed_nodes.append((affected_node.name, str(e)))
-                    
-                except Exception as e:
-                    failed_nodes.append((affected_node.name, f"Ошибка генерации: {str(e)}"))
-            
-            # Формируем сообщение для пользователя
-            if updated_nodes:
-                flash(f'Конфигурация обновлена для узлов: {", ".join(updated_nodes)}', 'success')
-            if failed_nodes:
-                error_msg = "; ".join([f"{name}: {err}" for name, err in failed_nodes])
-                flash(f'Ошибки обновления: {error_msg}', 'warning')
-            if not updated_nodes and not failed_nodes:
-                flash('Связи успешно обновлены в базе данных', 'info')
-                
-        except Exception as e:
-            db.session.rollback()
-            flash(f'Ошибка обновления связей: {str(e)}', 'danger')
-        return redirect(url_for('dashboard'))
-
-    # GET запрос - отображаем форму
-    available_nodes = node.get_available_for_connections()
+    available_nodes = General.query.filter(
+        General.role == "Magos", General.id != node_id).order_by(General.name).all()
     connected_ids = {
         conn.node2_id if conn.node1_id == node.id else conn.node1_id
         for conn in node.connections_as_node1 + node.connections_as_node2
     }
+    if request.method == 'POST':
+        from vpn_topology import project_magos_mesh
+        from vpn_plan import VPNPlanError
+        selected = request.form.getlist('connections')
+        try:
+            selected_ids = {int(n) for n in selected}
+        except ValueError:
+            abort(400)
+        valid_ids = {n.id for n in available_nodes}
+        if not selected_ids.issubset(valid_ids):
+            abort(400)
+        desired_ids = {(min(node.id, peer_id), max(node.id, peer_id)) for peer_id in selected_ids}
+        connections = NodeConnection.query.all()
+        untouched = [c for c in connections if node.id not in (c.node1_id, c.node2_id)]
+        proposed = untouched + [
+            NodeConnection(node1_id=a, node2_id=b) for a, b in desired_ids]
+        try:
+            # Validate address/route topology before changing the database.
+            # Missing peer keys are allowed while staging the topology:
+            # those are acquired through explicit v2 identity operations.
+            from types import SimpleNamespace
+            nodes = General.query.filter_by(role="Magos").all()
+            projected_nodes = [SimpleNamespace(
+                id=n.id, name=n.name, role=n.role, ip_pool=n.ip_pool,
+                endpoint=n.endpoint, listen_port=n.listen_port,
+                public_key=n.public_key or ('A' * 43 + '=')
+            ) for n in nodes]
+            project_magos_mesh(projected_nodes, proposed)
+            NodeConnection.query.filter(
+                (NodeConnection.node1_id == node_id) |
+                (NodeConnection.node2_id == node_id)
+            ).delete(synchronize_session=False)
+            for a, b in desired_ids:
+                db.session.add(NodeConnection(node1_id=a, node2_id=b,
+                                             description=f"Magos {a} ↔ Magos {b}"))
+            db.session.commit()
+            flash('Связи сохранены как желаемая топология. VPN НЕ применён.', 'success')
+        except (VPNPlanError, ValueError) as exc:
+            db.session.rollback()
+            flash(f'Ошибка проверки топологии: {exc}', 'danger')
+        except Exception:
+            db.session.rollback()
+            app.logger.exception('Failed to save Magos desired mesh')
+            flash('Не удалось сохранить связи', 'danger')
+        return redirect(url_for('manage_connections', node_id=node.id))
+    return render_template('manage_connections.html', node=node,
+                           available_nodes=available_nodes, connected_ids=connected_ids)
 
-
-    return render_template(
-        'manage_connections.html',
-        node=node,
-        available_nodes=available_nodes,
-        connected_ids=connected_ids
-    )
 
 @app.route('/api/available_ips', methods=['GET'])
 @login_required
