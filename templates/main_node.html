@@ -8,11 +8,7 @@
             <i class="bi bi-server me-2"></i>Главный узел: {{ node.name }}
         </h2>
         <div>
-            <button type="button" class="btn btn-{% if node.status == 'active' %}warning{% else %}success{% endif %} me-2" 
-                    onclick="toggleVPN({{ node.id }})">
-                <i class="bi bi-{% if node.status == 'active' %}stop{% else %}play{% endif %}-circle me-2"></i>
-                {% if node.status == 'active' %}Выключить VPN{% else %}Включить VPN{% endif %}
-            </button>
+            <span class="badge bg-info me-2">Control Plane · HTTPS/mTLS</span>
             <a href="{{ url_for('setup_wizard') }}" class="btn btn-gold me-2">
                 <i class="bi bi-plus-circle me-2"></i>Добавить узел
             </a>
@@ -55,14 +51,8 @@
                         <td><strong>Версия приложения:</strong></td>
                         <td><code>{{ (config.OMNISSIAH_RUNTIME_VERSION.get('git_commit') or config.OMNISSIAH_RUNTIME_VERSION.get('source_revision') or 'Не записана')[:12] }}</code></td>
                     </tr>
-                    <tr>
-                        <td><strong>Статус VPN:</strong></td>
-                        <td>
-                            <span class="badge bg-{% if node.status == 'active' %}success{% else %}danger{% endif %}">
-                                {{ STATUS_CHOICES.get(node.status, node.status) }}
-                            </span>
-                        </td>
-                    </tr>
+                    <tr><td><strong>Роль в сети:</strong></td><td>Управление и мониторинг; WireGuard не требуется</td></tr>
+
                 </table>
             </div>
         </div>
@@ -77,26 +67,7 @@
                     </span>
                 </div>
                 <table class="table table-dark table-sm">
-                    <tr>
-                        <td><strong>VPN включен:</strong></td>
-                        <td>
-                            {% if security_status.vpn_enabled %}
-                                <span class="badge bg-success">Да</span>
-                            {% else %}
-                                <span class="badge bg-danger">Нет</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    <tr>
-                        <td><strong>VPN подключен:</strong></td>
-                        <td>
-                            {% if security_status.vpn_connected %}
-                                <span class="badge bg-success">Да</span>
-                            {% else %}
-                                <span class="badge bg-danger">Нет</span>
-                            {% endif %}
-                        </td>
-                    </tr>
+                    <tr><td><strong>Data Plane:</strong></td><td><span class="badge bg-info">VPN выполняется на Magos</span></td></tr>
                     <tr>
                         <td><strong>mTLS активен:</strong></td>
                         <td>
@@ -122,7 +93,7 @@
                         <td>{{ 'Подтверждена heartbeat' if security_status.mtls_connected else 'Нет свежего heartbeat' }}</td>
                     </tr>
                 </table>
-                <p class="text-muted mb-0">mTLS защищает управление. VPN проверяется отдельно.</p>
+                <p class="text-muted mb-0">Управляющий сервер не участвует в передаче WireGuard-трафика.</p>
                 {% else %}
                 <p class="text-muted">Статус безопасности недоступен</p>
                 {% endif %}
@@ -193,6 +164,8 @@
                         <td>
                             {% if peer.vpn_status_display == 'online' %}
                                 <span class="badge bg-success">Online</span>
+                            {% elif peer.vpn_status_display == 'active' %}
+                                <span class="badge bg-info">Интерфейс активен · handshake не подтверждён</span>
                             {% else %}
                                 <span class="badge bg-danger">Offline</span>
                             {% endif %}
