@@ -75,7 +75,9 @@ def api_magos_heartbeat():
         
         # В ZTN архитектуре: сохраняем публичный ключ из heartbeat, если он пришел
         # Это важно, так как ключи генерируются на удаленных узлах и передаются через heartbeat
-        public_key_from_heartbeat = data.get('public_key')
+        # In managed mode public identity comes only from explicit v2 enrollment.
+        import os
+        public_key_from_heartbeat = None if os.getenv("OMNISSIAH_REQUIRE_MTLS", "false").lower() == "true" else data.get('public_key')
         current_app.logger.info(f"🔍 Проверка публичного ключа для {node_name}: heartbeat_key={bool(public_key_from_heartbeat)}, db_key={bool(node.public_key)}, db_key_value='{node.public_key[:20] if node.public_key else 'empty'}...'")
         
         if public_key_from_heartbeat and public_key_from_heartbeat.strip():
