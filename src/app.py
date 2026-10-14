@@ -3159,6 +3159,23 @@ def preview_vpn_mesh():
     return jsonify({'ready': True, 'plans': plans, 'applied': False}), 200
 
 
+@app.route('/vpn/overview')
+@login_required
+@require_omnissiah
+def vpn_overview():
+    """Dashboard for observed Magos VPN and explicitly desired topology."""
+    from management_status import peer_status
+    magi = General.query.filter_by(role='Magos').order_by(General.name).all()
+    by_id = {n.id: n for n in magi}
+    observations = [dict(node=n, status=peer_status(n)) for n in magi]
+    links = []
+    for edge in NodeConnection.query.all():
+        left, right = by_id.get(edge.node1_id), by_id.get(edge.node2_id)
+        if left is not None and right is not None:
+            links.append(dict(left=left.name, right=right.name))
+    return render_template('vpn_overview.html', nodes=observations, links=links)
+
+
 @app.route('/manage_connections/<int:node_id>', methods=['GET', 'POST'])
 @login_required
 @admin_required
