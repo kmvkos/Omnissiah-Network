@@ -3055,6 +3055,23 @@ def encrypt_wg_config(config_content):
     encrypted = cipher.encrypt(config_content.encode('utf-8'))
     return encrypted
 
+@app.route('/api/v2/vpn/mesh/preview', methods=['GET'])
+@login_required
+@admin_required
+@require_omnissiah
+def preview_vpn_mesh():
+    """Read-only, authenticated plan; does not activate any VPN interface."""
+    from vpn_topology import project_magos_mesh
+    from vpn_plan import VPNPlanError
+    magos_nodes = General.query.filter_by(role='Magos').all()
+    edges = NodeConnection.query.all()
+    try:
+        plans = project_magos_mesh(magos_nodes, edges)
+    except VPNPlanError as exc:
+        return jsonify({'ready': False, 'error': str(exc)}), 409
+    return jsonify({'ready': True, 'plans': plans, 'applied': False}), 200
+
+
 @app.route('/manage_connections/<int:node_id>', methods=['GET', 'POST'])
 @login_required
 @admin_required
