@@ -271,11 +271,11 @@
                 <div class="d-flex justify-content-between mt-3 pt-3" style="border-top: 1px solid var(--border-light);">
                     <div class="text-center flex-fill">
                         <div class="text-success" style="font-size: 1.5rem; font-weight: 600;">{{ active_nodes }}</div>
-                        <div class="stat-label">Активно</div>
+                        <div class="stat-label">На связи</div>
                     </div>
                     <div class="text-center flex-fill" style="border-left: 1px solid var(--border-light);">
                         <div class="text-danger" style="font-size: 1.5rem; font-weight: 600;">{{ inactive_nodes }}</div>
-                        <div class="stat-label">Неактивно</div>
+                        <div class="stat-label">Без heartbeat / не проверено</div>
                     </div>
                 </div>
             </div>
@@ -290,8 +290,8 @@
                 <div class="stat-label">Magos узлов</div>
                 <div class="mt-3 pt-3" style="border-top: 1px solid var(--border-light);">
                     <div class="d-flex justify-content-between align-items-center">
-                        <span class="stat-label">Ретрансляторы</span>
-                        <span class="badge badge-success-modern">{{ magi|selectattr('vpn_status', 'equalto', 'online')|list|length }} онлайн</span>
+                        <span class="stat-label">Прямые VPN-узлы</span>
+                        <span class="badge badge-success-modern">{{ magi|selectattr('vpn_status', 'equalto', 'online')|list|length }} с актуальным handshake</span>
                     </div>
                 </div>
             </div>
@@ -371,7 +371,7 @@
                         </div>
                         <div class="node-name" style="font-size: 1.25rem;">{{ omnissiah_server.name }}</div>
                         <div class="node-ip">{{ omnissiah_server.ip_pool }}</div>
-                        <span class="badge {% if omnissiah_server.status == 'active' %}badge-success-modern{% else %}badge-danger-modern{% endif %}">
+                        <span class="badge badge-info-modern">
                             Control Plane · mTLS
                         </span>
                     </div>
@@ -393,7 +393,7 @@
                                 <span class="badge {% if magos.vpn_status == 'online' %}badge-success-modern{% elif magos.vpn_status == 'active' %}badge-info-modern{% else %}badge-danger-modern{% endif %}">
                                     VPN: {{ 'Peer Online' if magos.vpn_status == 'online' else 'wg0 Active' if magos.vpn_status == 'active' else 'Нет данных / Off' }}
                                 </span>
-                                <span class="badge {% if magos.service_status == 'online' %}badge-success-modern{% else %}badge-danger-modern{% endif %}">
+                                <span class="badge {% if magos.mtls_status == 'online' %}badge-success-modern{% else %}badge-danger-modern{% endif %}">
                                     mTLS: {{ 'OK' if magos.mtls_status == 'online' else 'Нет' }}
                                 </span>
                             </div>
