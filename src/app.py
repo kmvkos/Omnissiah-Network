@@ -3055,6 +3055,93 @@ def encrypt_wg_config(config_content):
     encrypted = cipher.encrypt(config_content.encode('utf-8'))
     return encrypted
 
+def _vpn_v2_send(node, action, plan=None):
+    """Use Omnissiah's node certificate and CA for managed mTLS."""
+    from urllib.parse import urlsplit
+    controller = General.query.filter_by(role='Omnissiah').first()
+    if not controller or not node or node.role != "Magos":
+        raise ValueError("Magos and controller are required")
+    import ipaddress
+    host = str(ipaddress.IPv4Address(node.endpoint))
+    # Management nginx port is configured identically on controller and agents.
+    port = int(controller.nginx_https_port)
+    cert = "/var/lib/omnissiah-network/pki/identity.crt"
+    key = "/var/lib/omnissiah-network/pki/identity.key"
+    ca = "/var/lib/omnissiah-network/pki/ca.crt"
+    if not all(Path(p).is_file() for p in (cert, key, ca)):
+        raise ValueError("Omnissiah management identity not installed")
+    payload = {"action": action}
+    if plan is not None:
+        payload["plan"] = plan
+    response = requests.post(
+        f"https://{host}:{port}/api/v2/vpn/control",
+        cert=(cert, key), verify=ca, json=payload, timeout=15)
+    response.raise_for_status()
+    reply = response.json()
+    if not reply.get("success"):
+        raise ValueError("Magos reported a failed operation")
+    return reply["result"]
+
+
+@app.route('/api/v2/vpn/mesh/operation', methods=['POST'])
+@login_required
+@admin_required
+@require_omnissiah
+def vpn_mesh_operation():
+    """Explicit VPN operation. Never triggered from 'save connections'."""
+    from vpn_topology import project_magos_mesh
+    from vpn_plan import VPNPlanError
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or set(body) != {"node_id", "action"}:
+        return jsonify(error="Expected node_id and action"), 400
+    action = body["action"]
+    if action not in ("identity", "status", "prepare", "start", "apply"):
+        return jsonify(error="Unsupported operation"), 400
+    if type(body["node_id"]) is not int:
+        return jsonify(error="Invalid node ID"), 400
+    node = db.session.get(General, body["node_id"])
+    if not node or node.role != "Magos":
+        return jsonify(error="Magos not found"), 404
+    if action in ("start", "apply") and request.headers.get("X-VPN-Explicit-Apply") != "ENABLE_TEST_MESH":
+        return jsonify(error="Explicit lab activation acknowledgement required"), 409
+    try:
+        plan = None
+        if action in ("prepare", "apply"):
+            projected = project_magos_mesh(General.query.filter_by(role="Magos").all(),
+                                            NodeConnection.query.all())
+            selected = next(p for p in projected if p["node_id"] == node.id)
+            # Agent expects the exact strict schema, excluding UI-only peer names.
+            plan = {"node_name": selected["node_name"], "address": selected["address"],
+                    "listen_port": selected["listen_port"],
+                    "peers": [{k: peer[k] for k in ("public_key", "endpoint", "allowed_ips", "keepalive")}
+                              for peer in selected["peers"]]}
+            if not plan["peers"]:
+                return jsonify(error="No explicit Magos links configured"), 409
+        result = _vpn_v2_send(node, action, plan)
+        if action == "identity":
+            new_key = result.get("public_key")
+            if not isinstance(new_key, str):
+                raise ValueError("Invalid Magos public identity")
+            import base64, binascii
+            try:
+                if len(base64.b64decode(new_key, validate=True)) != 32:
+                    raise ValueError("Invalid public key length")
+            except (binascii.Error, ValueError) as exc:
+                raise ValueError("Invalid public key") from exc
+            if node.public_key and node.public_key != new_key:
+                return jsonify(error="Key differs from registered identity; explicit rotation required"), 409
+            node.public_key = new_key
+            db.session.commit()
+        return jsonify(success=True, action=action, node=node.name, result=result), 200
+    except (ValueError, VPNPlanError, StopIteration) as exc:
+        db.session.rollback()
+        return jsonify(error=str(exc)), 409
+    except (requests.RequestException, OSError, KeyError) as exc:
+        db.session.rollback()
+        app.logger.error("VPN v2 %s failed for %s: %s", action, node.name, exc)
+        return jsonify(error="VPN control call failed; check service and TLS logs"), 502
+
+
 @app.route('/api/v2/vpn/mesh/preview', methods=['GET'])
 @login_required
 @admin_required
