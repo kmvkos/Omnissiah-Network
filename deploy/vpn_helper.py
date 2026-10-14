@@ -119,7 +119,7 @@ def render(data, private_key):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["identity", "validate", "apply", "status"])
+    parser.add_argument("command", choices=["identity", "validate", "prepare", "start", "apply", "status"])
     parser.add_argument("--node-name", required=True)
     parser.add_argument("--plan", type=Path)
     args = parser.parse_args()
@@ -133,6 +133,20 @@ def main():
     if args.command == "status":
         exists = subprocess.run(["ip", "link", "show", "dev", IFACE], capture_output=True).returncode == 0
         print(json.dumps({"interface": IFACE, "active": exists}))
+        return
+    if args.command == "start":
+        config_file = WG_DIR / "wg0.conf"
+        if not config_file.is_file() or config_file.is_symlink():
+            raise HelperError("No prepared configuration")
+        if subprocess.run(["wg", "show", IFACE], capture_output=True).returncode == 0:
+            print(json.dumps({"active": True, "changed": False}))
+            return
+        try:
+            run(["wg-quick", "up", IFACE])
+        except HelperError:
+            # wg-quick tries its own rollback; do not change the management route.
+            raise
+        print(json.dumps({"active": True, "changed": True}))
         return
     if not args.plan:
         parser.error("--plan required")
@@ -150,9 +164,11 @@ def main():
     secret = STATE / "private.key"
     if not secret.is_file() or secret.is_symlink():
         raise HelperError("Identity must be initialized before apply")
-    # No implicit activation: apply is restricted to an already-up interface.
-    if subprocess.run(["wg", "show", IFACE], capture_output=True).returncode:
+    active = subprocess.run(["wg", "show", IFACE], capture_output=True).returncode == 0
+    if args.command == "apply" and not active:
         raise HelperError("Interface is not active; refusing implicit activation")
+    if args.command == "prepare" and active:
+        raise HelperError("Cannot prepare while interface is active; use apply")
     ensure_keys(STATE)  # Verify the persisted private/public pair before use.
     content = render(data, secret.read_text().strip())
     with tempfile.NamedTemporaryFile(mode="w", dir=WG_DIR, prefix="wg0-staged-", suffix=".conf", delete=False) as file:
@@ -162,13 +178,14 @@ def main():
         tmp.chmod(0o600)
         # wg-quick strip removes Address/other wg-quick-only settings.
         stripped = run(["wg-quick", "strip", str(tmp)])
-        # Use syncconf for multiple peers in one transaction. Errors abort.
-        run(["wg", "syncconf", IFACE, "/dev/stdin"], input=stripped)
-        # Atomically persist only after successful syncconf.
+        if args.command == "apply":
+            # Do not overwrite persistent state if kernel application fails.
+            run(["wg", "syncconf", IFACE, "/dev/stdin"], input=stripped)
+        # Atomic persistent write, even for the preparation-only phase.
         tmp.replace(WG_DIR / "wg0.conf")
     finally:
         tmp.unlink(missing_ok=True)
-    print(json.dumps({"applied": True, "peers": len(data["peers"])}))
+    print(json.dumps({"action": args.command, "changed": True, "peers": len(data["peers"])}))
 
 
 if __name__ == "__main__":
