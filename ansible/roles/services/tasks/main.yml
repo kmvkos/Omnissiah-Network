@@ -42,6 +42,16 @@
     group: "{{ omnissiah_service_user }}"
     mode: '0600'
   when: inventory_hostname in groups.magos
+- name: Stage the restricted VPN helper on Magos without enabling execution by the application
+  ansible.builtin.copy:
+    src: "{{ omnissiah_project_dir }}/deploy/vpn_helper.py"
+    dest: /usr/local/libexec/omnissiah-vpn-helper
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0700'
+  when: inventory_hostname in groups.magos
+
 - name: Install the application service
   ansible.builtin.template:
     src: application.service.j2
