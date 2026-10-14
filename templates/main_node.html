@@ -36,16 +36,16 @@
                         <td><span class="badge bg-primary">{{ node.role }}</span></td>
                     </tr>
                     <tr>
-                        <td><strong>IP-пул:</strong></td>
+                        <td><strong>VPN-пул адресов (выделение Magos):</strong></td>
                         <td><code>{{ node.ip_pool }}</code></td>
                     </tr>
                     <tr>
-                        <td><strong>Endpoint:</strong></td>
+                        <td><strong>Адрес управления:</strong></td>
                         <td><code>{{ node.endpoint or '-' }}</code></td>
                     </tr>
                     <tr>
-                        <td><strong>Порт:</strong></td>
-                        <td>{{ node.listen_port }}</td>
+                        <td><strong>Протокол управления:</strong></td>
+                        <td>HTTPS / mTLS</td>
                     </tr>
                     <tr>
                         <td><strong>Версия приложения:</strong></td>
