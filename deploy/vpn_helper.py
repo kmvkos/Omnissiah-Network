@@ -148,13 +148,14 @@ def main():
         print(json.dumps({"valid": True, "peers": len(data["peers"])}))
         return
     secret = STATE / "private.key"
-    if not secret.is_file():
+    if not secret.is_file() or secret.is_symlink():
         raise HelperError("Identity must be initialized before apply")
     # No implicit activation: apply is restricted to an already-up interface.
     if subprocess.run(["wg", "show", IFACE], capture_output=True).returncode:
         raise HelperError("Interface is not active; refusing implicit activation")
+    ensure_keys(STATE)  # Verify the persisted private/public pair before use.
     content = render(data, secret.read_text().strip())
-    with tempfile.NamedTemporaryFile(mode="w", dir=WG_DIR, prefix=".wg0-", delete=False) as file:
+    with tempfile.NamedTemporaryFile(mode="w", dir=WG_DIR, prefix="wg0-staged-", suffix=".conf", delete=False) as file:
         file.write(content)
         tmp = Path(file.name)
     try:
