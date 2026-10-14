@@ -72,6 +72,18 @@ def api_magos_heartbeat():
         # Сохраняем статус WireGuard из heartbeat
         wireguard_enabled = data.get('wireguard_enabled', False)
         node.wireguard_enabled = wireguard_enabled
+        # Never trust a peer-supplied future timestamp or reuse stale handshakes.
+        from datetime import timedelta
+        handshake = data.get('vpn_last_handshake', 0)
+        if type(handshake) is int and handshake > 0:
+            observed_at = datetime.fromtimestamp(handshake, tz=timezone.utc)
+            now = datetime.now(timezone.utc)
+            if now - timedelta(days=1) <= observed_at <= now + timedelta(seconds=5):
+                node.last_handshake = observed_at
+            else:
+                node.last_handshake = None
+        else:
+            node.last_handshake = None
         
         # В ZTN архитектуре: сохраняем публичный ключ из heartbeat, если он пришел
         # Это важно, так как ключи генерируются на удаленных узлах и передаются через heartbeat
