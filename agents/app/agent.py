@@ -31,7 +31,7 @@ def require_controller_identity():
 
 # В ZTN архитектуре: проверяем и регистрируем ключи при первом запуске
 print("[agent] 🔐 Проверка и регистрация ключей WireGuard...")
-if load_config().get('manage_wireguard', True):
+if not load_config().get("mtls_required") and load_config().get("manage_wireguard", True):
     check_and_register_keys()
 
 if os.getenv('OMNISSIAH_AGENT_BACKGROUND', 'true').lower() == 'true':
