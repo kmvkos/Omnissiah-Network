@@ -125,6 +125,12 @@
         </h3>
         
         <div class="action-buttons">
+            {% if node.role == 'Magos' %}
+            <a href="{{ url_for('manage_connections', node_id=node.id) }}" class="btn btn-modern btn-accent-modern">
+                <i class="bi bi-diagram-3 me-2"></i>Управление связями
+            </a>
+            {% endif %}
+
             <button type="button" class="btn btn-modern {% if node.vpn_status == 'online' %}btn-warning-modern{% else %}btn-accent-modern{% endif %}" 
                     id="toggleVpnBtn" onclick="toggleVPN({{ node.id }})">
                 <i class="bi bi-{% if node.vpn_status == 'online' %}stop{% else %}play{% endif %}-circle me-2"></i>
