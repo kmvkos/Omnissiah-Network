@@ -50,7 +50,7 @@ def process(message):
                 os.fchmod(tmp.fileno(), 0o600)
                 json.dump(plan, tmp)
             command += ["--plan", str(staged)]
-        result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(command, capture_output=True, text=True, timeout=50)
         if result.returncode:
             # Do not reveal command details or private material via API.
             raise ValueError("VPN helper rejected request; see local journal")
