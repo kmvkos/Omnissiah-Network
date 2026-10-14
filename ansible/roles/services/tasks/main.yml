@@ -52,6 +52,44 @@
     mode: '0700'
   when: inventory_hostname in groups.magos
 
+- name: Install restricted VPN RPC server on Magos
+  ansible.builtin.copy:
+    src: "{{ omnissiah_project_dir }}/deploy/vpn_rpc.py"
+    dest: /usr/local/libexec/omnissiah-vpn-rpc
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0700'
+  when: inventory_hostname in groups.magos
+  notify: Restart VPN RPC
+
+- name: Install Magos VPN socket unit
+  ansible.builtin.template:
+    src: vpn-rpc.socket.j2
+    dest: /etc/systemd/system/omnissiah-vpn-rpc.socket
+    owner: root
+    group: root
+    mode: '0644'
+  when: inventory_hostname in groups.magos
+
+- name: Install Magos VPN root service unit
+  ansible.builtin.template:
+    src: vpn-rpc.service.j2
+    dest: /etc/systemd/system/omnissiah-vpn-rpc.service
+    owner: root
+    group: root
+    mode: '0644'
+  when: inventory_hostname in groups.magos
+  notify: Restart VPN RPC
+
+- name: Enable local Magos RPC socket without enabling VPN interface
+  ansible.builtin.systemd_service:
+    name: omnissiah-vpn-rpc.socket
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: inventory_hostname in groups.magos
+
 - name: Install the application service
   ansible.builtin.template:
     src: application.service.j2
