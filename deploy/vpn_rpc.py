@@ -52,7 +52,11 @@ def process(message):
             command += ["--plan", str(staged)]
         result = subprocess.run(command, capture_output=True, text=True, timeout=50)
         if result.returncode:
-            # Do not reveal command details or private material via API.
+            # Keep stderr in the local journal; never pass it to HTTP clients.
+            import logging
+            logging.getLogger("omnissiah.vpn.rpc").error(
+                "VPN helper %s exited %s: %s", verb,
+                result.returncode, (result.stderr or "").strip()[:1000])
             raise ValueError("VPN helper rejected request; see local journal")
         return json.loads(result.stdout)
     finally:
