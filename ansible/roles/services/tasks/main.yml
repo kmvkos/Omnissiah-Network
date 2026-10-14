@@ -42,6 +42,15 @@
     group: "{{ omnissiah_service_user }}"
     mode: '0600'
   when: inventory_hostname in groups.magos
+- name: Ensure root-owned local helper directory exists
+  ansible.builtin.file:
+    path: /usr/local/libexec
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when: inventory_hostname in groups.magos
+
 - name: Stage the restricted VPN helper on Magos without enabling execution by the application
   ansible.builtin.copy:
     src: "{{ omnissiah_project_dir }}/deploy/vpn_helper.py"
