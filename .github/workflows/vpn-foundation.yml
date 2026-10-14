@@ -13,7 +13,8 @@ on:
       - 'deploy/vpn_helper.py'
       - 'tests/test_vpn_plan.py'
       - 'tests/test_vpn_helper.py'
-      - 'tests/test_vpn_readiness.py tests/test_vpn_topology.py'
+      - 'tests/test_vpn_readiness.py'
+      - 'tests/test_vpn_topology.py'
       - '.github/workflows/vpn-foundation.yml'
   workflow_dispatch:
 jobs:
@@ -32,4 +33,4 @@ jobs:
       - name: Validate separate VPN playbook syntax
         run: ansible-playbook -i ansible/inventory.example.yml ansible/vpn-mesh.yml --syntax-check
       - name: Validate planner and helper without root
-        run: python -m pytest -q tests/test_vpn_plan.py tests/test_vpn_helper.py tests/test_vpn_readiness.py
+        run: python -m pytest -q tests/test_vpn_plan.py tests/test_vpn_helper.py tests/test_vpn_readiness.py tests/test_vpn_topology.py
