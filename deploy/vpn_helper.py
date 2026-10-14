@@ -206,7 +206,7 @@ def main():
         raise HelperError("Cannot prepare while interface is active; use apply")
     ensure_keys(STATE)  # Verify the persisted private/public pair before use.
     content = render(data, secret.read_text().strip())
-    with tempfile.NamedTemporaryFile(mode="w", dir=WG_DIR, prefix="wg0-staged-", suffix=".conf", delete=False) as file:
+    with tempfile.NamedTemporaryFile(mode="w", dir=WG_DIR, prefix="wg-", suffix=".conf", delete=False) as file:
         file.write(content)
         tmp = Path(file.name)
     try:
