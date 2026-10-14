@@ -4,12 +4,16 @@ on:
     paths:
       - 'agents/app/vpn_plan.py'
       - 'agents/app/vpn_readiness.py'
+      - 'src/vpn_plan.py'
+      - 'src/vpn_topology.py'
+      - 'tests/test_vpn_topology.py'
+      - 'src/app.py'
       - 'agents/app/agent.py'
       - 'ansible/roles/services/tasks/main.yml'
       - 'deploy/vpn_helper.py'
       - 'tests/test_vpn_plan.py'
       - 'tests/test_vpn_helper.py'
-      - 'tests/test_vpn_readiness.py'
+      - 'tests/test_vpn_readiness.py tests/test_vpn_topology.py'
       - '.github/workflows/vpn-foundation.yml'
   workflow_dispatch:
 jobs:
@@ -24,7 +28,7 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install pytest ansible-core
       - name: Ensure syntax
-        run: python -m compileall -q agents/app/vpn_plan.py agents/app/vpn_readiness.py deploy/vpn_helper.py
+        run: python -m compileall -q agents/app/vpn_plan.py agents/app/vpn_readiness.py src/vpn_plan.py src/vpn_topology.py deploy/vpn_helper.py
       - name: Validate separate VPN playbook syntax
         run: ansible-playbook -i ansible/inventory.example.yml ansible/vpn-mesh.yml --syntax-check
       - name: Validate planner and helper without root
