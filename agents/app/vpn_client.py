@@ -19,7 +19,7 @@ def request_helper(action, *, plan=None, node_name=None):
     if len(payload) > MAX_BYTES:
         raise ValueError("VPN plan too large")
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-        connection.settimeout(20)
+        connection.settimeout(60)
         connection.connect(SOCKET)
         connection.sendall(payload + b"\n")
         data = bytearray()
