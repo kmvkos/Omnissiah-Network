@@ -3,9 +3,13 @@ on:
   pull_request:
     paths:
       - 'agents/app/vpn_plan.py'
+      - 'agents/app/vpn_readiness.py'
+      - 'agents/app/agent.py'
+      - 'ansible/roles/services/tasks/main.yml'
       - 'deploy/vpn_helper.py'
       - 'tests/test_vpn_plan.py'
       - 'tests/test_vpn_helper.py'
+      - 'tests/test_vpn_readiness.py'
       - '.github/workflows/vpn-foundation.yml'
   workflow_dispatch:
 jobs:
@@ -20,6 +24,6 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install pytest
       - name: Ensure syntax
-        run: python -m compileall -q agents/app/vpn_plan.py deploy/vpn_helper.py
+        run: python -m compileall -q agents/app/vpn_plan.py agents/app/vpn_readiness.py deploy/vpn_helper.py
       - name: Validate planner and helper without root
-        run: python -m pytest -q tests/test_vpn_plan.py tests/test_vpn_helper.py
+        run: python -m pytest -q tests/test_vpn_plan.py tests/test_vpn_helper.py tests/test_vpn_readiness.py
