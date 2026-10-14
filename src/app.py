@@ -4040,36 +4040,15 @@ def dashboard():
     if omnissiah_server:
         ip_stats = calculate_ip_ranges(omnissiah_server.ip_pool, omnissiah_server)
 
-    # 🔍 Сетевой статус через wg
-    now = datetime.now(timezone.utc)
-    wg_data = {}
-    try:
-        wg_output = subprocess.run(["wg", "show", "all", "dump"],
-                                   capture_output=True, text=True, check=True)
-        for line in wg_output.stdout.strip().splitlines():
-            parts = line.split()
-            if len(parts) >= 6:
-                allowed_ip = parts[4].split('/')[0]
-                latest_handshake = int(parts[5])
-                wg_data[allowed_ip] = latest_handshake
-    except Exception as e:
-        app.logger.debug(f"wg dump error: {e}")
-
+    # VPN exists only on Magos: use the last authenticated observed heartbeat,
+    # never try to inspect the controller's local wg interface.
+    from management_status import peer_status
     for magos in magi:
-        magos_ip = magos.ip_pool.split("/")[0]
-        handshake_ts = wg_data.get(magos_ip, 0)
-        vpn_alive = (int(now.timestamp()) - handshake_ts) < 180
-
-        if magos.last_heartbeat:
-            hb = magos.last_heartbeat
-            if hb.tzinfo is None:
-                hb = hb.replace(tzinfo=timezone.utc)
-            hb_alive = (now - hb) < timedelta(seconds=90)
-        else:
-            hb_alive = False
-
-        magos.vpn_status = 'online' if vpn_alive else 'offline'
-        magos.service_status = 'online' if hb_alive else 'offline'
+        observed = peer_status(magos)
+        magos.vpn_status = 'online' if observed['vpn_connected'] else (
+            'active' if observed['vpn_enabled'] else 'offline')
+        magos.service_status = 'online' if observed['service_active'] else 'offline'
+        magos.mtls_status = 'online' if observed['mtls_enabled'] else 'offline'
 
     return render_template('dashboard.html',
                            omnissiah_server=omnissiah_server,
@@ -4886,7 +4865,8 @@ def main_node(node_id=None):
         
         from management_status import peer_status
         observed = peer_status(peer)
-        peer.vpn_status_display = 'online' if observed['vpn_connected'] else 'offline'
+        peer.vpn_status_display = ('online' if observed['vpn_connected'] else
+                                   'active' if observed['vpn_enabled'] else 'offline')
         peer.mtls_status_display = 'online' if observed['mtls_enabled'] else 'offline'
         peer.management_status_display = 'online' if observed['service_active'] else 'offline'
 
@@ -5001,7 +4981,8 @@ def manage_node(node_id):
         
         from management_status import peer_status
         observed = peer_status(peer)
-        peer.vpn_status_display = 'online' if observed['vpn_connected'] else 'offline'
+        peer.vpn_status_display = ('online' if observed['vpn_connected'] else
+                                   'active' if observed['vpn_enabled'] else 'offline')
         peer.mtls_status_display = 'online' if observed['mtls_enabled'] else 'offline'
         peer.management_status_display = 'online' if observed['service_active'] else 'offline'
 
