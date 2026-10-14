@@ -274,6 +274,8 @@ def add_peer():
 @app.route('/api/magos/update_config', methods=['POST'])
 @app.route('/api/update_config', methods=['POST'])  # Альтернативный путь для обратной совместимости
 def update_config():
+    if load_config().get("mtls_required"):
+        return jsonify(error="Legacy VPN configuration endpoint disabled in managed mode; use /api/v2/vpn/control"), 410
     """
     Endpoint для приема и применения обновленной WireGuard конфигурации от Omnissiah
     
