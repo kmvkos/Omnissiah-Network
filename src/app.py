@@ -4048,8 +4048,12 @@ def dashboard():
     cognitors = General.query.filter_by(role='Cognitor').all()
 
     all_nodes = [omnissiah_server] + magi + cognitors if omnissiah_server else magi + cognitors
-    active_nodes = sum(1 for node in all_nodes if node and node.status == 'active')
-    inactive_nodes = sum(1 for node in all_nodes if node and node.status != 'active')
+    # Dashboard counts reflect observed management reachability, not
+    # the legacy VPN activation flag on the control-plane server.
+    from management_status import recent
+    active_nodes = (1 if omnissiah_server else 0) + sum(
+        1 for node in magi if recent(node.last_heartbeat, 90))
+    inactive_nodes = len(all_nodes) - active_nodes
 
     connections = NodeConnection.query.all()
 
