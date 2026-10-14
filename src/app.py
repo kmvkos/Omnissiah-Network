@@ -3075,7 +3075,7 @@ def _vpn_v2_send(node, action, plan=None):
         payload["plan"] = plan
     response = requests.post(
         f"https://{host}:{port}/api/v2/vpn/control",
-        cert=(cert, key), verify=ca, json=payload, timeout=15)
+        cert=(cert, key), verify=ca, json=payload, timeout=65)
     response.raise_for_status()
     reply = response.json()
     if not reply.get("success"):
