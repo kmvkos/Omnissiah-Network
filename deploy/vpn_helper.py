@@ -146,7 +146,7 @@ def main():
         return
     if args.command == "start":
         config_file = WG_DIR / "wg0.conf"
-        if not config_file.is_file() or config_file.is_symlink() or not config_file.read_text().startswith("# Managed by Omnissiah VPN v2\\n"):
+        if not config_file.is_file() or config_file.is_symlink() or not config_file.read_text().startswith("# Managed by Omnissiah VPN v2\n"):
             raise HelperError("No prepared configuration")
         if subprocess.run(["wg", "show", IFACE], capture_output=True).returncode == 0:
             print(json.dumps({"active": True, "changed": False}))
@@ -182,7 +182,7 @@ def main():
         raise HelperError("Identity must be initialized before apply")
     stored_config = WG_DIR / "wg0.conf"
     if stored_config.exists():
-        if stored_config.is_symlink() or not stored_config.is_file() or not stored_config.read_text().startswith("# Managed by Omnissiah VPN v2\\n"):
+        if stored_config.is_symlink() or not stored_config.is_file() or not stored_config.read_text().startswith("# Managed by Omnissiah VPN v2\n"):
             raise HelperError("Refusing to overwrite a configuration not owned by VPN v2")
     active = subprocess.run(["wg", "show", IFACE], capture_output=True).returncode == 0
     if args.command == "apply":
