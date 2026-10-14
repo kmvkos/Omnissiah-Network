@@ -1312,12 +1312,7 @@ select.form-control-modern {
                             <span>Главный узел</span>
                         </a>
                     </div>
-                    <div class="nav-item">
-                        <a href="{{ url_for('network_deployment_wizard') }}" class="nav-link {% if request.endpoint == 'network_deployment_wizard' %}active{% endif %}">
-                            <i class="bi bi-diagram-3"></i>
-                            <span>Мастер развёртывания (legacy)</span>
-                        </a>
-                    </div>
+
                 </div>
 
                 <!-- Управление сетью - показываем только если есть главная конфигурация -->
@@ -1327,6 +1322,20 @@ select.form-control-modern {
                         <a href="{{ url_for('vpn_overview') }}" class="nav-link {% if request.endpoint == 'vpn_overview' %}active{% endif %}">
                             <i class="bi bi-diagram-3"></i>
                             <span>VPN-сеть</span>
+                        </a>
+                    </div>
+
+
+
+                </div>
+                {% endif %}
+
+                <div class="nav-section">
+                    <div class="nav-section-title">Устаревшие модули</div>
+                    <div class="nav-item">
+                        <a href="{{ url_for('network_deployment_wizard') }}" class="nav-link {% if request.endpoint == 'network_deployment_wizard' %}active{% endif %}">
+                            <i class="bi bi-diagram-3"></i>
+                            <span>Мастер развёртывания (legacy)</span>
                         </a>
                     </div>
                     <div class="nav-item">
@@ -1348,9 +1357,7 @@ select.form-control-modern {
                         </a>
                     </div>
                 </div>
-                {% endif %}
-
-                <!-- Аккаунт -->
+                                <!-- Аккаунт -->
                 <div class="nav-section">
                     <div class="nav-section-title">Аккаунт</div>
                     <div class="nav-item">
