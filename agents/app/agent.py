@@ -52,6 +52,13 @@ def health():
 def status():
     return jsonify(get_status_info())
 
+@app.route("/api/v2/vpn/readiness", methods=["GET"])
+def vpn_readiness():
+    """Authenticated via the managed mTLS identity gate above; read-only."""
+    from app.vpn_readiness import get_readiness
+    return jsonify(get_readiness(load_config())), 200
+
+
 @app.route('/api/v1/install_dependencies', methods=['POST'])
 def install_dependencies():
     """
