@@ -69,3 +69,14 @@ def test_is_pure_preflight():
     source = path.read_text()
     assert "subprocess" not in source
     assert "os.system" not in source
+
+def test_refuse_more_specific_route_hijacking_connected_network():
+    with pytest.raises(mod.RouteConflict, match="overlaps"):
+        mod.plan_route_delta([peer("10.77.0.4/32")], [],
+                             [rt("10.77.0.0/24", "eth0")])
+
+
+def test_default_route_is_not_modified_or_treated_as_conflict():
+    result = mod.plan_route_delta([peer("10.77.0.4/32")], [],
+        [{"dst": "default", "gateway": "192.168.32.1", "dev": "eth0"}])
+    assert result["add"] == ["10.77.0.4/32"]
