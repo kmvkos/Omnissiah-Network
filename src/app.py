@@ -3180,6 +3180,27 @@ def vpn_mesh_change_preview():
             observation = _vpn_v2_send(by_id[plan["node_id"]], "status")
             result = preview(plan["peers"], observation.get("peers"),
                              active=observation.get("active") is True)
+            if result.get("reason") == "route_change_requires_transaction":
+                # A separate root-owned dry run checks the actual kernel
+                # routing table; no route changes are authorized here.
+                strict_plan = {
+                    "node_name": plan["node_name"],
+                    "address": plan["address"],
+                    "listen_port": plan["listen_port"],
+                    "peers": [
+                        {key: peer[key] for key in
+                         ("public_key", "endpoint", "allowed_ips", "keepalive")}
+                        for peer in plan["peers"]
+                    ],
+                }
+                try:
+                    routes = _vpn_v2_send(by_id[plan["node_id"]], "route-preview", strict_plan)
+                    result["route_delta"] = routes.get("route_delta", {})
+                    result["reason"] = "route_changes_validated_but_not_applied"
+                except (ValueError, requests.RequestException, OSError, RuntimeError) as exc:
+                    app.logger.warning("VPN route preflight rejected %s: %s",
+                                       plan["node_name"], exc)
+                    result["reason"] = "route_preflight_rejected"
         except (ValueError, requests.RequestException, OSError, KeyError, RuntimeError) as exc:
             app.logger.warning("VPN dry-run observation failed for %s: %s",
                                plan["node_name"], exc)
