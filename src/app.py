@@ -3057,7 +3057,7 @@ def encrypt_wg_config(config_content):
     encrypted = cipher.encrypt(config_content.encode('utf-8'))
     return encrypted
 
-def _vpn_v2_send(node, action, plan=None):
+def _vpn_v2_send(node, action, plan=None, operation_id=None):
     """Use Omnissiah's node certificate and CA for managed mTLS."""
     from urllib.parse import urlsplit
     controller = General.query.filter_by(role='Omnissiah').first()
@@ -3075,6 +3075,8 @@ def _vpn_v2_send(node, action, plan=None):
     payload = {"action": action}
     if plan is not None:
         payload["plan"] = plan
+    if operation_id is not None:
+        payload["operation_id"] = operation_id
     response = requests.post(
         f"https://{host}:{port}/api/v2/vpn/control",
         cert=(cert, key), verify=ca, json=payload, timeout=65)
@@ -3094,13 +3096,22 @@ def vpn_mesh_operation():
     from vpn_topology import project_magos_mesh
     from vpn_plan import VPNPlanError
     body = request.get_json(silent=True)
-    if not isinstance(body, dict) or not {"node_id", "action"} <= set(body) or set(body) - {"node_id", "action", "expected_revision"}:
+    if not isinstance(body, dict) or not {"node_id", "action"} <= set(body) or set(body) - {"node_id", "action", "expected_revision", "operation_id"}:
         return jsonify(error="Invalid VPN operation payload"), 400
     if body.get("action") == "route-transaction":
         if not isinstance(body.get("expected_revision"), str) or len(body["expected_revision"]) != 64:
             return jsonify(error="A preview revision is required"), 409
-    elif "expected_revision" in body:
-        return jsonify(error="Unexpected preview revision"), 400
+        import uuid
+        try:
+            op_id = body.get("operation_id")
+            parsed_id = uuid.UUID(op_id)
+            if (not isinstance(op_id, str) or len(op_id) != 36
+                    or parsed_id.version != 4 or str(parsed_id) != op_id):
+                raise ValueError("Invalid operation ID")
+        except (ValueError, TypeError, AttributeError):
+            return jsonify(error="A canonical operation UUIDv4 is required"), 400
+    elif "expected_revision" in body or "operation_id" in body:
+        return jsonify(error="Unexpected revision or operation ID"), 400
     action = body["action"]
     if action not in ("identity", "status", "prepare", "start", "apply", "route-transaction"):
         return jsonify(error="Unsupported operation"), 400
@@ -3162,7 +3173,8 @@ def vpn_mesh_operation():
                                    for peer in latest["peers"]]}
             if plan_revision(fresh_plan) != body["expected_revision"]:
                 return jsonify(error="Desired topology changed during preflight; repeat preview"), 409
-        result = _vpn_v2_send(node, action, plan)
+        result = _vpn_v2_send(node, action, plan,
+                              operation_id=body.get("operation_id") if action == "route-transaction" else None)
         if action in ("apply", "route-transaction"):
             from vpn_reconcile import compare
             observed_after = _vpn_v2_send(node, "status")
