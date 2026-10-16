@@ -71,8 +71,12 @@ def run_offline_mesh_transaction(plan, desired, backend, journal_directory):
         # Backups MUST exist before journal enters 'prepared'. A real backend
         # must durably persist original wg/file/route state; never journal keys.
         backend.stage_backup()
+        # The recovery descriptor contains only public peer settings, never
+        # private keys or WireGuard backup contents. It is durable before the
+        # first syncconf/route write and validated again by recovery.
         rec = {"schema_version": 1, "state": "prepared", "phase": "none",
-               "snapshot_sha256": plan["snapshot_sha256"], "route_ops": 0}
+               "snapshot_sha256": plan["snapshot_sha256"], "route_ops": 0,
+               "recovery": {"desired_peers": desired}}
         _journal(directory, rec)
         try:
             rec.update(state="applying", phase="wg_sync")
