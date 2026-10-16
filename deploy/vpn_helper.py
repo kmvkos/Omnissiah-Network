@@ -229,6 +229,10 @@ def main():
         # coordinator also takes its own lock during all mutations.
         STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
         peers, routes = LinuxReadOnlyPreflight().snapshot()
+        from vpn_route_tx import reject_protected_host_routes
+        protected = os.environ.get("OMNISSIAH_PROTECTED_MANAGEMENT_IPV4", "")
+        reject_protected_host_routes(
+            data["peers"], peers, [value.strip() for value in protected.split(",") if value.strip()])
         transaction = prepare_transaction(data["peers"], peers, routes)
         backend = IsolatedLinuxMeshBackend(
             data, transaction, state_dir=STATE,
