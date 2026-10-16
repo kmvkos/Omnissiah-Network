@@ -13,7 +13,7 @@ import sys
 
 from vpn_linux_preflight import LinuxReadOnlyPreflight
 from vpn_prepared_recovery import PreparedRecoveryBlocked, reconcile_prepared
-from vpn_route_executor_sim import _load_journal
+from vpn_route_executor_sim import _load_journal, TransactionBlocked
 
 
 STATE = Path("/var/lib/omnissiah-network/vpn")
@@ -60,7 +60,7 @@ def run():
 if __name__ == "__main__":
     try:
         print(json.dumps(run(), sort_keys=True))
-    except (PreparedRecoveryBlocked, OSError, ValueError) as exc:
+    except (TransactionBlocked, OSError, ValueError):
         # Never include backend exception payloads: they might contain
         # configuration lines or command output with secret key material.
         print(json.dumps({"state": "recovery_required",
