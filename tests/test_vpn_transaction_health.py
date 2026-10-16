@@ -111,3 +111,21 @@ def test_held_exclusive_lock_only_reports_in_progress(tmp_path):
         assert result["state"] == "in_progress"
         assert result["needs_attention"] is False
         assert result["reason"] == "transaction_lock_held"
+
+
+def test_transaction_status_is_read_only_and_connected_through_mtls():
+    helper = (ROOT / "deploy/vpn_helper.py").read_text()
+    rpc = (ROOT / "deploy/vpn_rpc.py").read_text()
+    agent = (ROOT / "agents/app/agent.py").read_text()
+    client = (ROOT / "agents/app/vpn_client.py").read_text()
+    controller = (ROOT / "src/app.py").read_text()
+    html = (ROOT / "templates/vpn_overview.html").read_text()
+    install = (ROOT / "ansible/roles/services/tasks/main.yml").read_text()
+    assert 'if args.command == "transaction-status":' in helper
+    assert "inspect_transaction(STATE)" in helper
+    assert all('"transaction-status"' in src for src in (rpc, agent, client))
+    assert '_vpn_v2_send(node, "transaction-status")' in controller
+    assert "def vpn_mesh_transaction_status():" in controller
+    assert 'url_for("vpn_mesh_transaction_status")' in html
+    assert "vpn_transaction_health.py" in install
+    assert "vpn_helper.py" not in module.__dict__.get("__doc__", "")
