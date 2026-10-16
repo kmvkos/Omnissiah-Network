@@ -3142,6 +3142,34 @@ def vpn_mesh_operation():
         return jsonify(error="VPN control call failed; check service and TLS logs"), 502
 
 
+@app.route('/api/v2/vpn/mesh/dry-run', methods=['GET'])
+@login_required
+@admin_required
+@require_omnissiah
+def vpn_mesh_dry_run():
+    """Read-only preview. No network writes and no implied approval."""
+    from vpn_topology import project_magos_mesh
+    from vpn_plan import VPNPlanError
+    from vpn_dry_run import preview_change
+    try:
+        magi = General.query.filter_by(role='Magos').all()
+        plans = project_magos_mesh(magi, NodeConnection.query.all())
+    except VPNPlanError as exc:
+        return jsonify(error=str(exc)), 409
+    lookup = {n.id: n for n in magi}
+    results = []
+    for plan in plans:
+        node = lookup[plan['node_id']]
+        try:
+            actual = _vpn_v2_send(node, 'status')
+            projected = preview_change(plan, actual, str(node.endpoint))
+        except (ValueError, OSError, RuntimeError, requests.RequestException, KeyError) as exc:
+            app.logger.warning("VPN dry-run observation failed for %s: %s", node.name, exc)
+            projected = {'safe': False, 'reason': 'management_query_failed', 'changes': []}
+        results.append(dict(node_id=node.id, node_name=node.name, **projected))
+    return jsonify(results=results, mode='dry-run', applied=False)
+
+
 @app.route('/api/v2/vpn/mesh/reconcile', methods=['GET'])
 @login_required
 @admin_required
