@@ -56,6 +56,11 @@ def inspect_transaction(directory):
     if not lock_path.exists():
         if journal.exists():
             return _bad("missing_lock_file")
+        # A backup can be durable before the first journal write. Never
+        # misreport this crash window as a clean idle state.
+        backup = folder / "mesh-backup.json"
+        if backup.exists() or backup.is_symlink():
+            return _bad("orphan_backup")
         return {"state": "idle", "phase": "none", "route_ops": 0,
                 "needs_attention": False, "backup_verified": False, "reason": None}
     try:
@@ -78,6 +83,9 @@ def inspect_transaction(directory):
 def _inspect_locked(folder):
     journal = folder / "mesh-transaction.json"
     if not journal.exists() and not journal.is_symlink():
+        backup = folder / "mesh-backup.json"
+        if backup.exists() or backup.is_symlink():
+            return _bad("orphan_backup")
         return {"state": "idle", "phase": "none", "route_ops": 0,
                 "needs_attention": False, "backup_verified": False, "reason": None}
     if not _valid_file(journal):
