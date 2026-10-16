@@ -66,7 +66,7 @@ def test_ambiguous_owned_route_rejected():
 def test_unrelated_routes_are_preserved_in_full():
     old = [{"dst": "10.77.0.3", "dev": "wg0"},
            {"dst": "192.0.2.0/24", "dev": "eth0", "metric": 50}]
-    new = old + [{"dst": "10.77.0.4", "dev": "wg0", "scope": "link"}]
+    new = [dict(row) for row in old] + [{"dst": "10.77.0.4", "dev": "wg0", "scope": "link"}]
     assert _unmanaged_routes(old, {"10.77.0.4/32"}) == _unmanaged_routes(
         new, {"10.77.0.4/32"})
     new[1]["metric"] = 60
