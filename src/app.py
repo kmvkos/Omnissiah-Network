@@ -3095,18 +3095,18 @@ def vpn_mesh_operation():
     if not isinstance(body, dict) or set(body) != {"node_id", "action"}:
         return jsonify(error="Expected node_id and action"), 400
     action = body["action"]
-    if action not in ("identity", "status", "prepare", "start", "apply"):
+    if action not in ("identity", "status", "prepare", "start", "apply", "route-transaction"):
         return jsonify(error="Unsupported operation"), 400
     if type(body["node_id"]) is not int:
         return jsonify(error="Invalid node ID"), 400
     node = db.session.get(General, body["node_id"])
     if not node or node.role != "Magos":
         return jsonify(error="Magos not found"), 404
-    if action in ("start", "apply") and request.headers.get("X-VPN-Explicit-Apply") != "ENABLE_TEST_MESH":
+    if action in ("start", "apply", "route-transaction") and request.headers.get("X-VPN-Explicit-Apply") != "ENABLE_TEST_MESH":
         return jsonify(error="Explicit lab activation acknowledgement required"), 409
     try:
         plan = None
-        if action in ("prepare", "apply"):
+        if action in ("prepare", "apply", "route-transaction"):
             projected = project_magos_mesh(General.query.filter_by(role="Magos").all(),
                                             NodeConnection.query.all())
             selected = next(p for p in projected if p["node_id"] == node.id)
@@ -3126,6 +3126,10 @@ def vpn_mesh_operation():
                                       active=observed_before.get("active") is True)
             if decision["decision"] != "eligible":
                 return jsonify(error="Apply refused by live preflight", preflight=decision), 409
+        if action == "route-transaction":
+            # Explicitly disabled until lab rollout and crash-recovery review.
+            if not app.config.get("VPN_ROUTE_TRANSACTIONS_ENABLED", False):
+                return jsonify(error="Route transactions not enabled on controller"), 403
         result = _vpn_v2_send(node, action, plan)
         if action == "apply":
             from vpn_reconcile import compare
