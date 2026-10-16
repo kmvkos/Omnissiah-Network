@@ -79,8 +79,15 @@ async function checkVpnDrift() {
     const response = await fetch('{{ url_for("reconcile_vpn_mesh") }}', {
       credentials: 'same-origin', cache: 'no-store'
     });
+    const kind = response.headers.get('content-type') || '';
+    if (!kind.includes('application/json')) {
+      throw Error('Сервер вернул HTTP ' + response.status +
+        ' вместо JSON' + (response.redirected ? ' (редирект на ' + new URL(response.url).pathname + ')' : '') +
+        '. Проверьте журнал omnissiah-network на omni01.');
+    }
     const payload = await response.json();
     if (!response.ok) throw Error(payload.error || 'HTTP ' + response.status);
+    if (!Array.isArray(payload.results)) throw Error('Некорректный формат результатов сверки');
     rows.replaceChildren();
     for (const item of payload.results) {
       const row = document.createElement('tr');
