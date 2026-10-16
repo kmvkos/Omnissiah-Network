@@ -44,8 +44,8 @@
     <p role="status" id="vpnTxHealthMessage" class="text-muted small">Проверка ещё не выполнялась.</p>
     <div class="table-responsive">
       <table class="table table-dark premium-table">
-        <thead><tr><th>Magos</th><th>Состояние</th><th>Этап</th><th>Маршрутных операций</th><th>Требует внимания</th></tr></thead>
-        <tbody id="vpnTxHealthRows"><tr><td colspan="5" class="text-muted text-center">Нет данных</td></tr></tbody>
+        <thead><tr><th>Magos</th><th>Состояние</th><th>Этап</th><th>ID операции</th><th>Маршрутных операций</th><th>Требует внимания</th></tr></thead>
+        <tbody id="vpnTxHealthRows"><tr><td colspan="6" class="text-muted text-center">Нет данных</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -122,11 +122,11 @@ async function vpnCheckTransactionHealth() {
       const row = document.createElement('tr');
       const attention = item.needs_attention === true ? 'Требуется проверка'
         : item.needs_attention === false ? 'Нет' : 'Неизвестно';
-      const values = [item.node_name, item.state, item.phase, item.route_ops, attention];
+      const values = [item.node_name, item.state, item.phase, item.operation_id || '—', item.route_ops, attention];
       for (let index = 0; index < values.length; index++) {
         const cell = document.createElement('td');
         cell.textContent = String(values[index]);
-        if (index === 4 && item.needs_attention === true) cell.className = 'text-danger';
+        if (index === 5 && item.needs_attention === true) cell.className = 'text-danger';
         row.appendChild(cell);
       }
       target.appendChild(row);
