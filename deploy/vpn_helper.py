@@ -136,7 +136,7 @@ def verify_active_peers(data):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["identity", "validate", "prepare", "start", "apply", "status"])
+    parser.add_argument("command", choices=["identity", "validate", "prepare", "start", "apply", "status", "route-preview"])
     parser.add_argument("--node-name", required=True)
     parser.add_argument("--plan", type=Path)
     args = parser.parse_args()
@@ -198,6 +198,20 @@ def main():
     data = validate_plan(json.loads(candidate.read_text()), args.node_name)
     if args.command == "validate":
         print(json.dumps({"valid": True, "peers": len(data["peers"])}))
+        return
+    if args.command == "route-preview":
+        from vpn_reconcile import parse_wg_dump
+        from vpn_route_tx import plan_route_delta, RouteConflict
+        if subprocess.run(["wg", "show", IFACE], capture_output=True).returncode:
+            raise HelperError("Cannot preview routes while WireGuard is inactive")
+        current_peers = parse_wg_dump(run(["wg", "show", IFACE, "dump"]))
+        routes = json.loads(run(["ip", "-j", "-4", "route", "show", "table", "main"]))
+        try:
+            result = plan_route_delta(data["peers"], current_peers, routes)
+        except RouteConflict as exc:
+            raise HelperError("Unsafe route delta: " + str(exc)) from exc
+        print(json.dumps({"safe_to_plan": True, "writes_performed": False,
+                          "route_delta": result}))
         return
     secret = STATE / "private.key"
     if not secret.is_file() or secret.is_symlink():
