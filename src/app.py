@@ -3275,7 +3275,7 @@ def vpn_mesh_transaction_status():
         try:
             observed = _vpn_v2_send(node, "transaction-status")
             allowed = {"state", "phase", "route_ops", "needs_attention",
-                       "backup_verified", "reason"}
+                       "backup_verified", "reason", "operation_id"}
             if not isinstance(observed, dict) or set(observed) != allowed:
                 raise ValueError("Invalid transaction status payload")
             results.append({"node_name": node.name, **observed})
@@ -3284,7 +3284,7 @@ def vpn_mesh_transaction_status():
             results.append({"node_name": node.name, "state": "unavailable",
                             "phase": "unknown", "route_ops": 0,
                             "needs_attention": None, "backup_verified": False,
-                            "reason": "management_status_unavailable"})
+                            "reason": "management_status_unavailable", "operation_id": None})
     return jsonify(results=results, applied=False)
 
 
