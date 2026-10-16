@@ -5,6 +5,8 @@ on:
     paths:
       - 'deploy/vpn_linux_backend.py'
       - 'deploy/vpn_mesh_transaction.py'
+      - 'deploy/vpn_add_only_recovery.py'
+      - 'tests/test_vpn_add_only_recovery.py'
       - 'deploy/vpn_route_tx.py'
       - 'deploy/vpn_route_journal.py'
       - 'deploy/vpn_linux_preflight.py'
@@ -38,4 +40,4 @@ jobs:
           sudo python3 -m unittest discover -s tests/integration -p test_vpn_netns_live.py -v
       - name: Run offline backend unit regression tests
         run: |
-          python3 -m pytest -q tests/test_vpn_linux_backend.py
+          python3 -m pytest -q tests/test_vpn_linux_backend.py tests/test_vpn_add_only_recovery.py
