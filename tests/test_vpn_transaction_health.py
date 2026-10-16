@@ -106,6 +106,7 @@ def test_held_exclusive_lock_only_reports_in_progress(tmp_path):
     folder = root_dir(tmp_path)
     record(folder, "applying")
     with (folder / "mesh-transaction.lock").open("a+") as lock:
+        os.fchmod(lock.fileno(), 0o600)
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         result = module.inspect_transaction(folder)
         assert result["state"] == "in_progress"
