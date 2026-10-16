@@ -74,6 +74,16 @@ def plan_route_delta(desired_peers, actual_wg_peers, main_routes, *, iface="wg0"
             raise RouteConflict("Host route conflicts with a foreign interface")
         if route["metric"] not in (None, 0):
             raise RouteConflict("Metric-bearing host route requires manual review")
+    # Never override an existing broader connected/static route on another
+    # interface. A more-specific /32 would silently hijack that destination.
+    for route in records:
+        network = ip_network(route["dst"], strict=False)
+        if network.prefixlen == 0:
+            continue
+        if route["dev"] == iface:
+            continue
+        if any(ip_address(host.split("/")[0]) in network for host in desired | previous):
+            raise RouteConflict("Target overlaps a route owned by another interface")
     if len(relevant) != len(occupied):
         raise RouteConflict("Ambiguous duplicate kernel routes")
     # A current WG AllowedIPs host route must have a corresponding Linux
