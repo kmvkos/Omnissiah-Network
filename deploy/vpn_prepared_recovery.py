@@ -106,4 +106,9 @@ def reconcile_prepared(folder, backend):
         completed = dict(record, state="rolled_back", phase="done")
         completed.pop("pending_route", None)
         _durable_write(folder, "mesh-transaction.json", completed)
+        if record.get("operation_id") is not None:
+            # Only close a UUID after original state verification and the
+            # terminal journal fsync. Failure leaves the UUID reserved.
+            from vpn_operation_fence import finish
+            finish(folder, record["operation_id"], "rolled_back")
         return {"state": "rolled_back", "changed": True}
