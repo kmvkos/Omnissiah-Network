@@ -75,12 +75,13 @@ def preview_route_commands(transaction):
     rollback = transaction.get("rollback")
     if not isinstance(steps, list) or not isinstance(rollback, list):
         raise RouteConflict("Invalid transaction operations")
+    # Validate every step before accessing its fields, including forged plans.
+    result = [_strict_route_operation(step) for step in steps]
+    [_strict_route_operation(step) for step in rollback]
     inverse = {"add": "delete", "delete": "add"}
     if rollback != [
         {"op": inverse[step["op"]], "dst": step["dst"], "dev": step["dev"]}
         for step in reversed(steps)
     ]:
         raise RouteConflict("Non-reversible transaction rejected")
-    result = [_strict_route_operation(step) for step in steps]
-    [_strict_route_operation(step) for step in rollback]
     return {"commands": result, "writes_performed": False, "executable": False}
