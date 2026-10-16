@@ -110,10 +110,10 @@ def persisted_inventory(text):
     return canonical, peers
 
 
-def preview_add(plan, *, current_peers, routes, persisted_config,
+def preview_add(plan, *, expected_name, current_peers, routes, persisted_config,
                 protected_addresses=()):
     """Fail closed on drift, collisions, invalid config or unknown route owners."""
-    data = validate_plan(plan, plan.get("node_name") if isinstance(plan, dict) else None)
+    data = validate_plan(plan, expected_name)
     address, disk_peers = persisted_inventory(persisted_config)
     if address != data["address"]:
         raise CognitorPreflightError("On-disk Magos address does not match")
