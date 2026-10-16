@@ -368,6 +368,67 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
         self._kill_forked_worker(work)
         return json.loads((self.state / "mesh-transaction.json").read_text())
 
+    def test_sigkill_after_backup_before_journal_detects_orphan_and_blocks(self):
+        """A durable backup with no journal is not an idle VPN."""
+        from vpn_transaction_health import inspect_transaction
+        from vpn_route_executor_sim import TransactionBlocked
+        lock = self.state / "mesh-transaction.lock"
+        lock.touch(mode=0o600)
+        lock.chmod(0o600)
+
+        def work():
+            original = self.backend.stage_backup
+
+            def kill_after_backup():
+                original()
+                os.kill(os.getpid(), signal.SIGKILL)
+            self.backend.stage_backup = kill_after_backup
+            run_offline_mesh_transaction(
+                self.plan, self.desired["peers"], self.backend, self.state)
+
+        self._kill_forked_worker(work)
+        self.assertTrue((self.state / "mesh-backup.json").exists())
+        self.assertFalse((self.state / "mesh-transaction.json").exists())
+        state = inspect_transaction(self.state)
+        self.assertEqual((state["state"], state["reason"]),
+                         ("recovery_required", "orphan_backup"))
+        self.assertTrue(state["needs_attention"])
+        self.assertEqual(self._wg_keys(), {self.old_public})
+        self.assertEqual(self._route_set(), {OLD_ROUTE})
+        with self.assertRaisesRegex(TransactionBlocked, "Unresolved backup"):
+            run_offline_mesh_transaction(
+                self.plan, self.desired["peers"], self.backend, self.state)
+
+    def test_sigkill_after_prepared_journal_recovers_without_network_changes(self):
+        """Actual process is killed after durable prepared journal, before WG sync."""
+        import vpn_mesh_transaction
+        from vpn_prepared_recovery import reconcile_prepared
+        lock = self.state / "mesh-transaction.lock"
+        lock.touch(mode=0o600)
+        lock.chmod(0o600)
+
+        def work():
+            original = vpn_mesh_transaction._journal
+
+            def kill_after_prepared(folder, record):
+                original(folder, record)
+                if record.get("state") == "prepared":
+                    os.kill(os.getpid(), signal.SIGKILL)
+            vpn_mesh_transaction._journal = kill_after_prepared
+            run_offline_mesh_transaction(
+                self.plan, self.desired["peers"], self.backend, self.state)
+
+        self._kill_forked_worker(work)
+        saved = json.loads((self.state / "mesh-transaction.json").read_text())
+        self.assertEqual((saved["state"], saved["phase"]), ("prepared", "none"))
+        self.assertEqual(self._wg_keys(), {self.old_public})
+        self.assertEqual(self._route_set(), {OLD_ROUTE})
+        self.assertEqual(reconcile_prepared(
+            self.state, self.backend), {"state": "rolled_back", "changed": True})
+        self.assertEqual(self._wg_keys(), {self.old_public})
+        self.assertEqual(self._route_set(), {OLD_ROUTE})
+        self.assertEqual(self.config.read_bytes(), self.before_config)
+
     def test_sigkill_after_wg_sync_fails_closed_at_nonrecoverable_phase(self):
         """Real kernel new peer exists, but old route/peer must remain untouched."""
         from vpn_add_only_recovery import reconcile_add_only, AddOnlyRecoveryBlocked
