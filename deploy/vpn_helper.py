@@ -224,7 +224,7 @@ def main():
         current = parse_wg_dump(run(["wg", "show", IFACE, "dump"]))
         routes = json.loads(run(["ip", "-j", "-4", "route", "show", "table", "main"]))
         protected = os.environ.get("OMNISSIAH_PROTECTED_MANAGEMENT_IPV4", "")
-        result = preview_add(raw_plan, current_peers=current, routes=routes,
+        result = preview_add(raw_plan, expected_name=args.node_name, current_peers=current, routes=routes,
                              persisted_config=config_file.read_text(),
                              protected_addresses=[entry.strip() for entry in protected.split(",") if entry.strip()])
         print(json.dumps(result))
