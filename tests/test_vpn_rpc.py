@@ -52,3 +52,16 @@ def test_explicit_start_rejects_supplied_plan(monkeypatch):
     monkeypatch.setenv("OMNISSIAH_NODE_NAME", "magos01")
     with pytest.raises(ValueError):
         mod.process({"action":"start", "node_name":"magos01", "plan":{"shell":"any"}})
+
+
+def test_route_transaction_requires_plan_and_fixed_node_identity(monkeypatch, tmp_path):
+    monkeypatch.setenv("OMNISSIAH_NODE_NAME", "magos01")
+    monkeypatch.setattr(mod, "STATE", tmp_path / "vpn")
+    for payload in (
+        {"action": "route-transaction", "node_name": "magos01"},
+        {"action": "route-transaction", "node_name": "magos02", "plan": {}},
+        {"action": "route-transaction", "node_name": "magos01",
+         "plan": {}, "shell": "whoami"},
+    ):
+        with pytest.raises(ValueError):
+            mod.process(payload)
