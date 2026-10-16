@@ -54,6 +54,10 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
         command("ip", "-n", self.netns, "link", "add", "wg0", "type", "wireguard")
         command("ip", "-n", self.netns, "address", "add", WG0_ADDRESS, "dev", "wg0")
         command("ip", "-n", self.netns, "link", "set", "wg0", "up")
+        # Explicit underlay path for management/peer endpoint safety checks.
+        command("ip", "-n", self.netns, "link", "set", "lo", "up")
+        command("ip", "-n", self.netns, "-4", "route", "add",
+                "192.0.2.0/24", "dev", "lo")
         private, _ = keypair()
         _, old_public = keypair()
         _, new_public = keypair()
@@ -230,7 +234,7 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
         """Remove only the new peer; keep original peer and route."""
         from vpn_add_only_recovery import reconcile_add_only
         self._crash_route_stage(route_present=False)
-        result = reconcile_add_only(self.state, self.backend, ["198.51.100.1"])
+        result = reconcile_add_only(self.state, self.backend, ["10.77.0.2"])
         self.assertEqual(result, {"state": "rolled_back", "changed": True})
         self.assertEqual(self._route_set(), {OLD_ROUTE})
         self.assertEqual(self._wg_keys(), {self.old_public})
@@ -243,7 +247,7 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
         from vpn_add_only_recovery import reconcile_add_only
         self._crash_route_stage(route_present=True)
         self.assertEqual(self._route_set(), {OLD_ROUTE, NEW_ROUTE})
-        result = reconcile_add_only(self.state, self.backend, ["198.51.100.1"])
+        result = reconcile_add_only(self.state, self.backend, ["10.77.0.2"])
         self.assertEqual(result["state"], "rolled_back")
         self.assertEqual(self._route_set(), {OLD_ROUTE})
         self.assertEqual(self._wg_keys(), {self.old_public})
@@ -257,7 +261,7 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
         command("ip", "netns", "exec", self.netns, "wg", "set", "wg0",
                 "peer", foreign, "allowed-ips", "10.77.0.99/32")
         with self.assertRaisesRegex(AddOnlyRecoveryBlocked, "Kernel peer state differs"):
-            reconcile_add_only(self.state, self.backend, ["198.51.100.1"])
+            reconcile_add_only(self.state, self.backend, ["10.77.0.2"])
         self.assertIn(foreign, self._wg_keys())
         self.assertEqual(self._route_set(), {OLD_ROUTE, NEW_ROUTE})
 
@@ -267,7 +271,7 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
         self._crash_route_stage(route_present=False)
         command("ip", "-n", self.netns, "-4", "route", "add", NEW_ROUTE, "dev", "lo")
         with self.assertRaisesRegex(AddOnlyRecoveryBlocked, "Foreign route"):
-            reconcile_add_only(self.state, self.backend, ["198.51.100.1"])
+            reconcile_add_only(self.state, self.backend, ["10.77.0.2"])
         self.assertEqual(self._wg_keys(), {self.old_public, self.new_public})
 
     def test_sequential_real_peer_additions_preserve_existing_mesh(self):
