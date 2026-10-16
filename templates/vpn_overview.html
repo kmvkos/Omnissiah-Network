@@ -1,45 +1,5 @@
 {% extends 'layout.html' %}
-{% block title %}VPN-сеть<script>
-async function checkVpnDrift() {
-  const btn = document.getElementById('vpnReconcileBtn');
-  const info = document.getElementById('vpnReconcileState');
-  const rows = document.getElementById('vpnReconcileRows');
-  btn.disabled = true;
-  info.textContent = 'Опрос фактического состояния Magos...';
-  try {
-    const response = await fetch('{{ url_for("reconcile_vpn_mesh") }}', {
-      credentials: 'same-origin', cache: 'no-store'
-    });
-    const payload = await response.json();
-    if (!response.ok) throw Error(payload.error || 'HTTP ' + response.status);
-    rows.replaceChildren();
-    for (const item of payload.results) {
-      const row = document.createElement('tr');
-      const label = item.state === 'in_sync' ? 'In sync'
-          : item.state === 'drift' ? 'Drift' : 'Unknown';
-      const reason = item.reason || (item.state === 'drift'
-          ? 'Отсутствует / отличается пир: ' + item.missing_peers + ' / ' + item.unexpected_peers + ' / ' + item.different_peers : '—');
-      const values = [item.node_name, item.desired_peers, item.observed_peers ?? '—', label, reason];
-      for (let i = 0; i < values.length; i++) {
-        const cell = document.createElement('td');
-        cell.textContent = String(values[i]);
-        if (i === 3) {
-          const color = item.state === 'in_sync' ? 'success' : item.state === 'drift' ? 'warning' : 'secondary';
-          cell.className = 'text-' + color;
-        }
-        row.appendChild(cell);
-      }
-      rows.appendChild(row);
-    }
-    info.textContent = 'Сверка выполнена. Никакие настройки узлов не менялись.';
-  } catch (err) {
-    info.textContent = 'Ошибка сверки: ' + err.message;
-  } finally {
-    btn.disabled = false;
-  }
-}
-</script>
-{% endblock %}
+{% block title %}VPN-сеть{% endblock %}
 {% block content %}
 <div class="container-fluid">
   <div class="d-flex justify-content-between align-items-center mb-4">
@@ -106,4 +66,46 @@ async function checkVpnDrift() {
     </div>
   </div>
 </div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function checkVpnDrift() {
+  const btn = document.getElementById('vpnReconcileBtn');
+  const info = document.getElementById('vpnReconcileState');
+  const rows = document.getElementById('vpnReconcileRows');
+  btn.disabled = true;
+  info.textContent = 'Опрос фактического состояния Magos...';
+  try {
+    const response = await fetch('{{ url_for("reconcile_vpn_mesh") }}', {
+      credentials: 'same-origin', cache: 'no-store'
+    });
+    const payload = await response.json();
+    if (!response.ok) throw Error(payload.error || 'HTTP ' + response.status);
+    rows.replaceChildren();
+    for (const item of payload.results) {
+      const row = document.createElement('tr');
+      const label = item.state === 'in_sync' ? 'In sync'
+          : item.state === 'drift' ? 'Drift' : 'Unknown';
+      const reason = item.reason || (item.state === 'drift'
+          ? 'Отсутствует / отличается пир: ' + item.missing_peers + ' / ' + item.unexpected_peers + ' / ' + item.different_peers : '—');
+      const values = [item.node_name, item.desired_peers, item.observed_peers ?? '—', label, reason];
+      for (let i = 0; i < values.length; i++) {
+        const cell = document.createElement('td');
+        cell.textContent = String(values[i]);
+        if (i === 3) {
+          const color = item.state === 'in_sync' ? 'success' : item.state === 'drift' ? 'warning' : 'secondary';
+          cell.className = 'text-' + color;
+        }
+        row.appendChild(cell);
+      }
+      rows.appendChild(row);
+    }
+    info.textContent = 'Сверка выполнена. Никакие настройки узлов не менялись.';
+  } catch (err) {
+    info.textContent = 'Ошибка сверки: ' + err.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+</script>
 {% endblock %}
