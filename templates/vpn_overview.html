@@ -20,6 +20,10 @@
       <div class="col-12 col-md-4"><div class="rounded border p-3 h-100"><div class="text-muted small">Управление на связи</div><div class="fs-3 fw-bold">{{ nodes | selectattr('status.service_active') | list | length }} / {{ nodes | length }}</div></div></div>
       <div class="col-12 col-md-4"><div class="rounded border p-3 h-100"><div class="text-muted small">Недавнее рукопожатие</div><div class="fs-3 fw-bold">{{ nodes | selectattr('status.vpn_connected') | list | length }} / {{ nodes | length }}</div></div></div>
     </div>
+    <div class="mt-3 d-flex flex-wrap align-items-center gap-2">
+      <a href="{{ url_for('cognitors.vpn_cognitors') }}" class="btn btn-outline-modern"><i class="bi bi-person-plus me-1"></i>VPN-клиенты Cognitor</a>
+      <span class="text-muted small">Регистрация клиентов пока сохраняет только черновики, без изменений VPN.</span>
+    </div>
     <nav class="mt-3 d-flex flex-wrap gap-2" aria-label="Порядок проверки VPN">
       <a class="btn btn-sm btn-outline-modern" href="#vpn-health">Состояние узлов</a>
       <a class="btn btn-sm btn-outline-modern" href="#vpn-compare">Сверка</a>
