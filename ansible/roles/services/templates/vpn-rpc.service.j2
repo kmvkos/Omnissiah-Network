@@ -11,7 +11,10 @@ Environment="OMNISSIAH_NODE_NAME={{ inventory_hostname }}"
 # Trusted IPs come from the validated Ansible inventory, not an HTTP plan.
 # Protect Omni01 and every Magos management IP during route transactions.
 Environment="OMNISSIAH_PROTECTED_MANAGEMENT_IPV4={{ ([hostvars[groups.omnissiah[0]].ansible_host] + (groups.magos | map('extract', hostvars, 'ansible_host') | list)) | join(',') }}"
-# OMNISSIAH_ENABLE_ROUTE_TRANSACTIONS intentionally absent: fail closed.
+# Explicit host-level root-helper opt-in; disabled unless set to boolean true in inventory.
+{% if omnissiah_vpn_route_transactions_root_enabled | default(false) %}
+Environment="OMNISSIAH_ENABLE_ROUTE_TRANSACTIONS=YES"
+{% endif %}
 
 ExecStart=/usr/bin/python3 /usr/local/libexec/omnissiah-vpn-rpc
 Restart=on-failure
