@@ -145,8 +145,16 @@ async function applyVpnRouteTransaction(nodeId, nodeName, previewRevision, butto
       '? Сначала убедитесь, что сохранены снапшоты и доступ к управлению.')) return;
   if (prompt('Для подтверждения введите имя узла: ' + nodeName) !== nodeName) return;
   const info = document.getElementById('vpnPreviewMessage');
+  // A new UUID is minted once for this click and must never be reused for
+  // another desired revision, even after a browser/network timeout.
+  if (!window.crypto || typeof window.crypto.randomUUID !== 'function') {
+    info.textContent = 'Для безопасной транзакции необходим HTTPS и поддержка crypto.randomUUID.';
+    return;
+  }
+  const operationId = window.crypto.randomUUID();
   button.disabled = true;
-  info.textContent = 'Применяю транзакцию на ' + nodeName + '. Не повторяйте запрос.';
+  info.textContent = 'Применяю транзакцию на ' + nodeName +
+    ', операция ' + operationId + '. Не повторяйте запрос.';
   try {
     const response = await fetch('/api/v2/vpn/mesh/operation', {
       method: 'POST',
@@ -157,7 +165,8 @@ async function applyVpnRouteTransaction(nodeId, nodeName, previewRevision, butto
       },
       body: JSON.stringify({
         node_id: nodeId, action: 'route-transaction',
-        expected_revision: previewRevision
+        expected_revision: previewRevision,
+        operation_id: operationId
       })
     });
     if (!(response.headers.get('content-type') || '').includes('application/json')) {
@@ -167,11 +176,12 @@ async function applyVpnRouteTransaction(nodeId, nodeName, previewRevision, butto
     if (!response.ok || !payload.success) {
       throw new Error(payload.error || 'HTTP ' + response.status);
     }
-    info.textContent = 'Транзакция ' + nodeName +
-      ' завершена; сервер проверил peers. Повторите сверку VPN и проверьте handshake.';
+    info.textContent = 'Транзакция ' + nodeName + ' (' + operationId +
+      ') завершена; сервер проверил peers. Повторите сверку VPN и проверьте handshake.';
   } catch (error) {
-    info.textContent = 'Ошибка транзакции ' + nodeName + ': ' + error.message +
-      '. Не повторяйте применение до проверки журнала и состояния узла.';
+    info.textContent = 'Ошибка транзакции ' + nodeName +
+      ' (ID ' + operationId + '): ' + error.message +
+      '. Результат может быть неизвестен. Не запускайте новый Apply до проверки журнала и состояния узла.';
   }
   // The previous preview must never remain a reusable authorization.
   document.getElementById('vpnPreviewRows').replaceChildren();
