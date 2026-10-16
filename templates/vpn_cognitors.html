@@ -23,11 +23,11 @@
       </div></div>
       <div class="col-12 col-md-4"><div class="border rounded p-3 h-100">
         <strong>3. Доступ к ресурсам</strong>
-        <p class="small text-muted mb-0">Подключение к VPN само по себе не предоставляет доступ к защищаемым серверам и подсетям. Доступ выдаётся отдельной политикой.</p>
+        <p class="small text-muted mb-0">Политики доступа ещё не реализованы в VPN v2. До их применения используйте Cognitor только на изолированном стенде.</p>
       </div></div>
     </div>
     <p class="small text-warning mt-3 mb-0"><i class="bi bi-exclamation-triangle me-1"></i>
-      Сначала сохраните черновик, затем проверьте подключение и отдельно подтвердите применение на Magos. Конфигурация клиента устанавливается на Debian вручную; приватный ключ не покидает клиента.
+      Сначала сохраните черновик, затем выполните предпросмотр и отдельно подтвердите применение на Magos. Используйте только изолированную лабораторную сеть. Конфигурация клиента устанавливается на Debian вручную; приватный ключ не покидает клиента.
     </p>
   </div>
 
@@ -93,7 +93,7 @@ wg pubkey &lt; cognitor-private.key</code></pre>
                 Проверить и применить
               </a>
               {% else %}
-              <span class="text-muted small">Проверьте рукопожатие на Magos</span>
+              <a class="btn btn-sm btn-outline-modern" href="{{ url_for('cognitors.vpn_cognitor_status', draft_id=draft.id) }}">Проверить соединение</a>
               {% endif %}
             </td>
           </tr>
