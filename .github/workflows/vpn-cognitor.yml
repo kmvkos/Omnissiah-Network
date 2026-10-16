@@ -11,12 +11,12 @@ on:
       - 'ansible/roles/services/tasks/main.yml'
       - 'src/nmc_api/__init__.py'
       - 'src/vpn_cognitor_models.py'
-      - 'src/vpn_cognitor_validation.py deploy/vpn_cognitor_preview.py'
+      - 'src/vpn_cognitor_validation.py'
       - 'templates/vpn_cognitors.html'
       - 'templates/vpn_cognitor_preview.html'
       - 'templates/vpn_overview.html'
       - 'tests/test_vpn_cognitor_blueprint.py'
-      - 'tests/test_vpn_cognitor_validation.py tests/test_vpn_cognitor_preview.py'
+      - 'tests/test_vpn_cognitor_validation.py'
       - 'tests/test_vpn_cognitor_preview.py'
       - '.github/workflows/vpn-cognitor.yml'
   workflow_dispatch:
@@ -34,6 +34,6 @@ jobs:
       - name: Install controller dependencies
         run: python -m pip install -r requirements.txt pytest
       - name: Check module syntax
-        run: python -m compileall -q src/nmc_api/cognitors.py src/vpn_cognitor_models.py src/vpn_cognitor_validation.py
+        run: python -m compileall -q src/nmc_api/cognitors.py src/vpn_cognitor_models.py src/vpn_cognitor_validation.py deploy/vpn_cognitor_preview.py deploy/vpn_helper.py deploy/vpn_rpc.py agents/app/agent.py agents/app/vpn_client.py
       - name: Test database registration, CSRF and address admission
-        run: python -m pytest -q tests/test_vpn_cognitor_blueprint.py tests/test_vpn_cognitor_validation.py
+        run: python -m pytest -q tests/test_vpn_cognitor_blueprint.py tests/test_vpn_cognitor_validation.py tests/test_vpn_cognitor_preview.py
