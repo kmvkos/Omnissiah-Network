@@ -21,7 +21,7 @@ def process(message):
     if not isinstance(message, dict):
         raise ValueError("Expected JSON object")
     verb = message.get("action")
-    if verb not in ("identity", "status", "prepare", "start", "apply", "route-preview", "route-transaction"):
+    if verb not in ("identity", "status", "prepare", "start", "apply", "route-preview", "route-transaction", "transaction-status"):
         raise ValueError("Unknown operation")
     if set(message) - {"action", "node_name", "plan"}:
         raise ValueError("Unknown fields")
