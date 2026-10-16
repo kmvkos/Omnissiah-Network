@@ -23,7 +23,7 @@ def process(message):
     verb = message.get("action")
     if verb not in ("identity", "status", "prepare", "start", "apply", "route-preview", "route-transaction", "transaction-status"):
         raise ValueError("Unknown operation")
-    if set(message) - {"action", "node_name", "plan"}:
+    if set(message) - {"action", "node_name", "plan", "operation_id"}:
         raise ValueError("Unknown fields")
     node_name = message.get("node_name")
     if not isinstance(node_name, str) or not node_name or len(node_name) > 50 or any(
@@ -40,7 +40,15 @@ def process(message):
             raise ValueError("Plan required")
     elif plan is not None:
         raise ValueError("Unexpected plan")
+    operation_id = message.get("operation_id")
+    if verb == "route-transaction":
+        from vpn_operation_fence import validate_operation_id
+        validate_operation_id(operation_id)
+    elif operation_id is not None:
+        raise ValueError("Unexpected operation ID")
     command = ["/usr/bin/python3", HELPER, verb, "--node-name", node_name]
+    if operation_id is not None:
+        command += ["--operation-id", operation_id]
     staged = None
     try:
         if plan is not None:
