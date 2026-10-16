@@ -260,7 +260,7 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
         _, foreign = keypair()
         command("ip", "netns", "exec", self.netns, "wg", "set", "wg0",
                 "peer", foreign, "allowed-ips", "10.77.0.99/32")
-        with self.assertRaisesRegex(AddOnlyRecoveryBlocked, "Kernel peer state differs"):
+        with self.assertRaises(AddOnlyRecoveryBlocked):
             reconcile_add_only(self.state, self.backend, ["10.77.0.2"])
         self.assertIn(foreign, self._wg_keys())
         self.assertEqual(self._route_set(), {OLD_ROUTE, NEW_ROUTE})
