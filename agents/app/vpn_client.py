@@ -8,7 +8,7 @@ MAX_BYTES = 65536
 
 
 def request_helper(action, *, plan=None, node_name=None):
-    if action not in ("identity", "status", "prepare", "start", "apply", "route-preview"):
+    if action not in ("identity", "status", "prepare", "start", "apply", "route-preview", "route-transaction"):
         raise ValueError("Unsupported VPN action")
     message = {"action": action}
     if node_name is not None:
