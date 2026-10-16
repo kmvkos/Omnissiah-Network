@@ -231,12 +231,18 @@ def main():
         peers, routes = LinuxReadOnlyPreflight().snapshot()
         from vpn_route_tx import reject_protected_host_routes
         protected = os.environ.get("OMNISSIAH_PROTECTED_MANAGEMENT_IPV4", "")
-        reject_protected_host_routes(
-            data["peers"], peers, [value.strip() for value in protected.split(",") if value.strip()])
+        management_addresses = [value.strip() for value in protected.split(",") if value.strip()]
+        reject_protected_host_routes(data["peers"], peers, management_addresses)
+        endpoint_addresses = [
+            peer["endpoint"].rsplit(":", 1)[0]
+            for peer in list(data["peers"]) + list(peers)
+            if peer.get("endpoint") and peer["endpoint"] != "(none)"
+        ]
         transaction = prepare_transaction(data["peers"], peers, routes)
         backend = IsolatedLinuxMeshBackend(
             data, transaction, state_dir=STATE,
-            config_path=WG_DIR / "wg0.conf", allow_mutations=True)
+            config_path=WG_DIR / "wg0.conf", allow_mutations=True,
+            protected_addresses=management_addresses + endpoint_addresses)
         try:
             result = run_offline_mesh_transaction(
                 transaction, data["peers"], backend, STATE)
