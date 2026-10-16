@@ -121,6 +121,7 @@
     - vpn_route_journal.py
     - vpn_route_executor_sim.py
     - vpn_transaction_health.py
+    - vpn_prepared_recovery.py
   when: inventory_hostname in groups.magos
   notify: Restart VPN RPC
 
@@ -134,6 +135,32 @@
       - -c
       - "import sys; sys.path.insert(0, '/usr/local/libexec'); from vpn_linux_backend import IsolatedLinuxMeshBackend; from vpn_mesh_transaction import run_offline_mesh_transaction"
   changed_when: false
+  when: inventory_hostname in groups.magos
+
+- name: Install restricted no-network prepared recovery CLI
+  ansible.builtin.copy:
+    src: "{{ omnissiah_project_dir }}/deploy/vpn_prepared_recover_cli.py"
+    dest: /usr/local/libexec/omnissiah-vpn-prepared-recover
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0700'
+  when: inventory_hostname in groups.magos
+
+- name: Stage optional prepared recovery systemd service
+  ansible.builtin.template:
+    src: vpn-prepared-recovery.service.j2
+    dest: /etc/systemd/system/omnissiah-vpn-prepared-recovery.service
+    owner: root
+    group: root
+    mode: '0644'
+  when: inventory_hostname in groups.magos
+
+- name: Keep prepared recovery boot unit disabled unless explicitly opted in
+  ansible.builtin.systemd_service:
+    name: omnissiah-vpn-prepared-recovery.service
+    enabled: "{{ omnissiah_vpn_prepared_recovery_boot_enabled | default(false) | bool }}"
+    daemon_reload: true
   when: inventory_hostname in groups.magos
 
 - name: Install restricted VPN RPC server on Magos
