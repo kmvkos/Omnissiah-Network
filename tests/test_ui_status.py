@@ -51,3 +51,17 @@ def test_vpn_reconcile_script_is_emitted_in_script_block_not_title():
     assert "checkVpnDrift" not in title
     assert "async function checkVpnDrift()" in script
     assert "url_for(\"reconcile_vpn_mesh\")" in script
+
+def test_reconcile_uses_request_context_not_contextless_threads():
+    source = (ROOT / "src/app.py").read_text()
+    section = source.split("def reconcile_vpn_mesh():", 1)[1].split("@app.route(", 1)[0]
+    assert "ThreadPoolExecutor" not in section
+    assert "map(poll, plans)" in section
+    assert "RuntimeError" in section
+
+
+def test_reconcile_ui_checks_response_content_type():
+    source = (ROOT / "templates/vpn_overview.html").read_text()
+    script = source.split("{% block scripts %}", 1)[1]
+    assert "content-type" in script
+    assert "Сервер вернул HTTP" in script
