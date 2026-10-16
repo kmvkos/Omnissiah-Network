@@ -3142,6 +3142,60 @@ def vpn_mesh_operation():
         return jsonify(error="VPN control call failed; check service and TLS logs"), 502
 
 
+@app.route('/api/v2/vpn/mesh/reconcile', methods=['GET'])
+@login_required
+@admin_required
+@require_omnissiah
+def reconcile_vpn_mesh():
+    """Observe each Magos directly over mTLS; no mutating operations."""
+    from vpn_topology import project_magos_mesh
+    from vpn_plan import VPNPlanError
+    from vpn_reconcile import compare
+    import concurrent.futures
+    nodes = General.query.filter_by(role='Magos').all()
+    by_id = {n.id: n for n in nodes}
+    try:
+        plans = project_magos_mesh(nodes, NodeConnection.query.all())
+    except VPNPlanError as exc:
+        return jsonify(error=str(exc), ready=False), 409
+
+    def poll(plan):
+        node = by_id[plan["node_id"]]
+        try:
+            result = _vpn_v2_send(node, "status")
+            return plan["node_id"], result, None
+        except (ValueError, requests.RequestException, OSError, KeyError) as exc:
+            app.logger.warning("VPN status poll failed for %s: %s", node.name, exc)
+            return plan["node_id"], None, "management_query_failed"
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(plans), 8) or 1) as pool:
+        observed = {node_id: (status, error)
+                    for node_id, status, error in pool.map(poll, plans)}
+    records = []
+    for plan in plans:
+        state, error = observed[plan["node_id"]]
+        expected = plan["peers"]
+        if error:
+            diff = {"state": "unknown", "reason": error}
+        elif not state.get("active"):
+            diff = {"state": "drift", "reason": "interface_inactive"}
+        else:
+            diff = compare(expected, state.get("peers"))
+        # Intentionally avoid copying keys to the summary response.
+        records.append({
+            "node_id": plan["node_id"], "node_name": plan["node_name"],
+            "desired_peers": len(expected),
+            "observed_peers": len(state["peers"]) if state and state.get("peers") is not None else None,
+            "interface_active": bool(state.get("active")) if state else None,
+            "state": diff["state"],
+            "reason": diff.get("reason"),
+            "missing_peers": len(diff.get("missing_peer_keys", [])),
+            "unexpected_peers": len(diff.get("unexpected_peer_keys", [])),
+            "different_peers": len(diff.get("different_peers", [])),
+        })
+    return jsonify(results=records, applied=False, queried_at=datetime.now(timezone.utc).isoformat())
+
+
 @app.route('/api/v2/vpn/mesh/preview', methods=['GET'])
 @login_required
 @admin_required
