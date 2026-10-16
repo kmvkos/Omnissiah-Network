@@ -14,7 +14,14 @@ working network.
 
 - The controller remains reachable through the original management NIC,
   not through `wg0`. Distinguish mTLS management plane from VPN dataplane.
-- `wg-quick@wg0.service` is enabled and active after a clean reboot.
+- `wg-quick@wg0.service` is enabled before reboot. It may be
+  `inactive` **before reboot** when Omnissiah has started `wg0` manually
+  via `wg-quick up` and only enabled systemd. After reboot it must be
+  **active**. Do not attempt `systemctl start` on an already-running wg0
+  just to satisfy the preflight.
+- Root-owned `/etc/wireguard/wg0.conf` must be managed by Omnissiah and
+  describe exactly the same peer keys and /32 AllowedIPs as the running
+  interface. This protects against rebooting with an older saved topology.
 - Every expected WireGuard peer has the same (hashed) identity, exact /32
   AllowedIPs and corresponding main-table `wg0` host route.
 - Every peer has a fresh WireGuard handshake within 180 seconds at the end
@@ -98,3 +105,24 @@ python3 -m compileall -q scripts/vpn_vm_reboot_probe.py
 
 Neither command requires WireGuard or root; observations are mocked.
 Actual Phase A/B can only be claimed after running the steps against VMs.
+
+
+## Existing three-Magos lab — operator-controlled exception
+
+The operator elected to test the existing four VMs, without a disposable
+clone. Risk is higher: an unexpected reboot failure can interrupt current
+Full Mesh. Do NOT automatically reboot nodes or initiate power-loss testing
+from this script. Work only one Magos at a time, ensure hypervisor console
+and fresh VM snapshots are available, and explicitly validate the surviving
+Magos01 ↔ Magos02 link while Magos03 is down.
+
+Magos03 observed before reboot: `wg0` exists, `wg-quick@wg0.service`
+is enabled but inactive, consistent with the helper's manual `wg-quick up`
+followed by `systemctl enable`. Updated baseline accepts that state *only*
+if live peer/route/handshake checks and the on-disk config parity all pass.
+Post-boot `verify` requires the systemd unit to be active and both peer
+handshakes to become fresh.
+
+The baseline file should be stored as `/root/vpn-before.json` (not a
+truncated `.jso`). Existing old probes must be replaced by the newly
+tested revision before any reboot is authorized.
