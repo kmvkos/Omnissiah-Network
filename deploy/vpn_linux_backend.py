@@ -147,16 +147,17 @@ class IsolatedLinuxMeshBackend:
     def sync_wireguard(self, desired):
         self._require_enabled()
         full = self._prepared_config(desired)
-        fd, name = tempfile.mkstemp(dir=self._state, suffix=".conf", prefix=".wg-stage-")
-        try:
+        # wg-quick requires the basename to be a valid interface, i.e. wg0.conf.
+        # Keep the fixed filename in a private temporary directory so that we
+        # never overwrite the host's persisted WireGuard configuration.
+        with tempfile.TemporaryDirectory(dir=self._state, prefix="wg-stage-") as directory:
+            staged = Path(directory) / "wg0.conf"
+            fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, "w") as out:
-                os.fchmod(out.fileno(), 0o600)
                 out.write(full)
                 out.flush()
                 os.fsync(out.fileno())
-            stripped = self._command(["wg-quick", "strip", name])
-        finally:
-            Path(name).unlink(missing_ok=True)
+            stripped = self._command(["wg-quick", "strip", str(staged)])
         self._command(["wg", "syncconf", "wg0", "/dev/stdin"], input=stripped)
 
     def route_step(self, step):
