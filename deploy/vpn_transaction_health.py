@@ -20,7 +20,7 @@ VALID_PHASES = frozenset(("none", "wg_sync", "route", "verify", "persist_config"
 def _bad(reason):
     return {"state": "recovery_required", "phase": "unknown",
             "route_ops": 0, "needs_attention": True,
-            "backup_verified": False, "reason": reason}
+            "backup_verified": False, "reason": reason, "operation_id": None}
 
 
 def _valid_file(path):
@@ -41,7 +41,8 @@ def inspect_transaction(directory):
     folder = Path(directory)
     if not folder.exists():
         return {"state": "not_initialized", "phase": "none", "route_ops": 0,
-                "needs_attention": False, "backup_verified": False, "reason": None}
+                "needs_attention": False, "backup_verified": False, "reason": None,
+                "operation_id": None}
     if folder.is_symlink() or not folder.is_dir():
         return _bad("unsafe_state_directory")
     info = folder.stat()
@@ -62,7 +63,8 @@ def inspect_transaction(directory):
         if backup.exists() or backup.is_symlink():
             return _bad("orphan_backup")
         return {"state": "idle", "phase": "none", "route_ops": 0,
-                "needs_attention": False, "backup_verified": False, "reason": None}
+                "needs_attention": False, "backup_verified": False, "reason": None,
+                "operation_id": None}
     try:
         fd = os.open(lock_path, os.O_RDONLY | os.O_NOFOLLOW)
         with os.fdopen(fd, "r") as lock:
@@ -74,20 +76,32 @@ def inspect_transaction(directory):
             except BlockingIOError:
                 return {"state": "in_progress", "phase": "unknown", "route_ops": 0,
                         "needs_attention": False, "backup_verified": False,
-                        "reason": "transaction_lock_held"}
+                        "reason": "transaction_lock_held", "operation_id": None}
             return _inspect_locked(folder)
     except OSError:
         return _bad("journal_unavailable")
 
 
 def _inspect_locked(folder):
+    # The at-most-once reservation is fsynced *before* backup creation. A
+    # crash in that window leaves neither journal nor backup; never claim idle.
+    from vpn_operation_fence import _load, OperationRejected
+    try:
+        reservations = _load(folder)["operations"]
+    except OperationRejected:
+        return _bad("invalid_operation_ledger")
+    unresolved = {key for key, item in reservations.items()
+                  if item["state"] == "reserved"}
     journal = folder / "mesh-transaction.json"
     if not journal.exists() and not journal.is_symlink():
+        if unresolved:
+            return _bad("orphan_operation")
         backup = folder / "mesh-backup.json"
         if backup.exists() or backup.is_symlink():
             return _bad("orphan_backup")
         return {"state": "idle", "phase": "none", "route_ops": 0,
-                "needs_attention": False, "backup_verified": False, "reason": None}
+                "needs_attention": False, "backup_verified": False, "reason": None,
+                "operation_id": None}
     if not _valid_file(journal):
         return _bad("unsafe_journal")
     try:
@@ -96,6 +110,26 @@ def _inspect_locked(folder):
         return _bad("invalid_journal")
     if not isinstance(record, dict) or record.get("schema_version") != 1:
         return _bad("invalid_journal")
+    op_id = record.get("operation_id")
+    if op_id is not None:
+        from vpn_operation_fence import validate_operation_id
+        try:
+            validate_operation_id(op_id)
+        except OperationRejected:
+            return _bad("invalid_journal_operation_id")
+        ledger_entry = reservations.get(op_id)
+        if ledger_entry is None:
+            return _bad("missing_operation_reservation")
+        # A journal can be terminal just before its ledger is updated; that
+        # outcome is unknown to the retry gate until explicitly reconciled.
+        if record.get("state") in TERMINAL and ledger_entry["state"] == "reserved":
+            return _bad("unsettled_operation_ledger")
+        if record.get("state") in TERMINAL and ledger_entry["state"] != record["state"]:
+            return _bad("operation_outcome_mismatch")
+        if record.get("state") in ACTIVE and ledger_entry["state"] != "reserved":
+            return _bad("operation_outcome_mismatch")
+    elif unresolved and record.get("state") in TERMINAL:
+        return _bad("unsettled_operation_ledger")
     state, phase, count = record.get("state"), record.get("phase"), record.get("route_ops")
     if state not in TERMINAL | ACTIVE or phase not in VALID_PHASES or type(count) is not int or count < 0:
         return _bad("invalid_journal")
@@ -123,4 +157,5 @@ def _inspect_locked(folder):
         return _bad("missing_backup")
     return {"state": state, "phase": phase, "route_ops": count,
             "needs_attention": state in ACTIVE, "backup_verified": verified,
-            "reason": "unresolved_transaction" if state in ACTIVE else None}
+            "reason": "unresolved_transaction" if state in ACTIVE else None,
+            "operation_id": op_id}
