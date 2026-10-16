@@ -170,6 +170,10 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
         """Recovery after a durable backup but before first kernel write."""
         from vpn_route_executor_sim import _durable_write
         from vpn_prepared_recovery import reconcile_prepared
+        # The coordinator creates the exclusive lock before staging a backup.
+        lock_path = self.state / "mesh-transaction.lock"
+        lock_path.touch(mode=0o600)
+        lock_path.chmod(0o600)
         self.backend.stage_backup()
         _durable_write(self.state, "mesh-transaction.json", {
             "schema_version": 1, "state": "prepared", "phase": "none",
@@ -187,6 +191,9 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
         """Refuse if a journal claims prepared but kernel peers have drifted."""
         from vpn_route_executor_sim import _durable_write
         from vpn_prepared_recovery import reconcile_prepared, PreparedRecoveryBlocked
+        lock_path = self.state / "mesh-transaction.lock"
+        lock_path.touch(mode=0o600)
+        lock_path.chmod(0o600)
         self.backend.stage_backup()
         _durable_write(self.state, "mesh-transaction.json", {
             "schema_version": 1, "state": "prepared", "phase": "none",
