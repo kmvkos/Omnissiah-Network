@@ -164,6 +164,18 @@ def preview_add(plan, *, expected_name, current_peers, routes, persisted_config,
             raise CognitorPreflightError("Destination /32 route already exists")
         if network.version == 4 and network.subnet_of(target):
             raise CognitorPreflightError("Route overlaps client host")
+    # Reuse the existing route ownership validator: an overlapping broader
+    # network on another interface must not silently be hijacked by a /32.
+    from vpn_route_tx import plan_route_delta, RouteConflict
+    try:
+        desired = current_peers + [{"public_key": data["public_key"],
+                                    "allowed_ips": [requested],
+                                    "endpoint": "", "keepalive": 0}]
+        delta = plan_route_delta(desired, current_peers, routes)
+        if delta["add"] != [requested] or delta["remove"]:
+            raise CognitorPreflightError("Non-additive route delta")
+    except RouteConflict as exc:
+        raise CognitorPreflightError("Route ownership conflict") from exc
     digest = hashlib.sha256(json.dumps({
         "plan": data,
         "peers": sorted((key, allowed) for key, allowed in running.items()),

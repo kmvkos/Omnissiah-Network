@@ -123,6 +123,7 @@
     - vpn_transaction_health.py
     - vpn_operation_fence.py
     - vpn_cognitor_preview.py
+    - vpn_cognitor_transaction.py
     - vpn_prepared_recovery.py
   when: inventory_hostname in groups.magos
   notify: Restart VPN RPC

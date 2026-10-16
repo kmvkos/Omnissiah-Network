@@ -23,11 +23,11 @@
       </div></div>
       <div class="col-12 col-md-4"><div class="border rounded p-3 h-100">
         <strong>3. Доступ к ресурсам</strong>
-        <p class="small text-muted mb-0">Подключение к VPN само по себе не предоставляет доступ к защищаемым серверам и подсетям. Доступ выдаётся отдельной политикой.</p>
+        <p class="small text-muted mb-0">Политики доступа ещё не реализованы в VPN v2. До их применения используйте Cognitor только на изолированном стенде.</p>
       </div></div>
     </div>
     <p class="small text-warning mt-3 mb-0"><i class="bi bi-exclamation-triangle me-1"></i>
-      Сейчас доступно только сохранение черновика. Оно не меняет WireGuard, маршруты или межсетевой экран. Конфигурацию клиента пока нельзя скачать.
+      Сначала сохраните черновик, затем выполните предпросмотр и отдельно подтвердите применение на Magos. Используйте только изолированную лабораторную сеть. Конфигурация клиента устанавливается на Debian вручную; приватный ключ не покидает клиента.
     </p>
   </div>
 
@@ -76,7 +76,7 @@ wg pubkey &lt; cognitor-private.key</code></pre>
 
   <div class="premium-card p-4">
     <h5 class="mb-2">Зарегистрированные Cognitor</h5>
-    <p class="small text-muted">Этот список показывает лишь заявки на подключение. Статус «Черновик» не означает, что WireGuard-туннель работает.</p>
+    <p class="small text-muted">«Черновик» — не установлен на Magos. «Настроен на Magos» — пир и маршрут сохранены, но наличие рукопожатия нужно проверять отдельно.</p>
     <div class="table-responsive">
       <table class="table table-dark premium-table">
         <thead><tr><th>Клиент</th><th>VPN-адрес</th><th>Родительский Magos</th><th>Статус</th><th>Действие</th></tr></thead>
@@ -86,12 +86,15 @@ wg pubkey &lt; cognitor-private.key</code></pre>
             <td><strong>{{ draft.name }}</strong></td>
             <td><code>{{ draft.vpn_address }}</code></td>
             <td>{{ draft.parent_magos.name if draft.parent_magos else 'Неизвестен' }}</td>
-            <td><span class="badge bg-secondary">{{ 'Черновик' if draft.status == 'draft' else 'Требует проверки' }}</span></td>
+            <td><span class="badge bg-secondary">{{ 'Черновик' if draft.status == 'draft' else 'Настроен на Magos' if draft.status == 'applied' else 'Требует проверки' }}</span></td>
             <td>
+              {% if draft.status == 'draft' %}
               <a class="btn btn-sm btn-outline-modern" href="{{ url_for('cognitors.vpn_cognitor_preview', draft_id=draft.id) }}">
-                Проверить подключение
+                Проверить и применить
               </a>
-              <span class="text-muted small ms-2">Применение пока недоступно</span>
+              {% else %}
+              <a class="btn btn-sm btn-outline-modern" href="{{ url_for('cognitors.vpn_cognitor_status', draft_id=draft.id) }}">Проверить соединение</a>
+              {% endif %}
             </td>
           </tr>
           {% else %}

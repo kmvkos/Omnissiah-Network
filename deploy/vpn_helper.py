@@ -137,16 +137,16 @@ def verify_active_peers(data):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["identity", "validate", "prepare", "start", "apply", "status", "route-preview", "route-transaction", "transaction-status", "cognitor-preview"])
+    parser.add_argument("command", choices=["identity", "validate", "prepare", "start", "apply", "status", "route-preview", "route-transaction", "transaction-status", "cognitor-preview", "cognitor-add"])
     parser.add_argument("--node-name", required=True)
     parser.add_argument("--plan", type=Path)
     parser.add_argument("--operation-id")
     args = parser.parse_args()
-    if args.command == "route-transaction":
+    if args.command in ("route-transaction", "cognitor-add"):
         from vpn_operation_fence import validate_operation_id
         validate_operation_id(args.operation_id)
     elif args.operation_id is not None:
-        parser.error("--operation-id is only valid for route-transaction")
+        parser.error("--operation-id is only valid for root transactions")
     if not args.node_name or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for c in args.node_name):
         parser.error("Invalid node name")
     if os.geteuid() != 0:
@@ -229,6 +229,25 @@ def main():
                              protected_addresses=[entry.strip() for entry in protected.split(",") if entry.strip()])
         print(json.dumps(result))
         return
+    if args.command == "cognitor-add":
+        if os.environ.get("OMNISSIAH_ENABLE_ROUTE_TRANSACTIONS") != "YES":
+            raise HelperError("Cognitor additions are disabled by root policy")
+        if set(raw_plan) != {"node_name", "address", "client_name",
+                             "client_address", "public_key", "expected_revision"}:
+            raise HelperError("Invalid Cognitor add schema")
+        revision = raw_plan.pop("expected_revision")
+        if raw_plan.get("node_name") != args.node_name:
+            raise HelperError("Cognitor operation belongs to another Magos")
+        if subprocess.run(["wg", "show", IFACE], capture_output=True).returncode:
+            raise HelperError("Cannot add Cognitor to inactive WireGuard")
+        from vpn_cognitor_transaction import add_cognitor
+        addresses = os.environ.get("OMNISSIAH_PROTECTED_MANAGEMENT_IPV4", "")
+        protected = [ip.strip() for ip in addresses.split(",") if ip.strip()]
+        result = add_cognitor(raw_plan, operation_id=args.operation_id,
+                              expected_revision=revision,
+                              protected_addresses=protected)
+        print(json.dumps(result))
+        return
     data = validate_plan(raw_plan, args.node_name)
     if args.command == "validate":
         print(json.dumps({"valid": True, "peers": len(data["peers"])}))
@@ -248,6 +267,9 @@ def main():
                           "route_delta": result}))
         return
     if args.command == "route-transaction":
+        config_now = WG_DIR / "wg0.conf"
+        if config_now.is_file() and not config_now.is_symlink() and "# Cognitor: " in config_now.read_text():
+            raise HelperError("Mesh-only transaction must not remove registered Cognitors")
         # Explicit opt-in only: never modify running routes through ordinary apply.
         if os.environ.get("OMNISSIAH_ENABLE_ROUTE_TRANSACTIONS") != "YES":
             raise HelperError("Route transactions are disabled")
@@ -293,6 +315,8 @@ def main():
             raise HelperError("Refusing to overwrite a configuration not owned by VPN v2")
     active = subprocess.run(["wg", "show", IFACE], capture_output=True).returncode == 0
     if args.command == "apply":
+        if stored_config.is_file() and "# Cognitor: " in stored_config.read_text():
+            raise HelperError("Legacy mesh apply cannot overwrite registered Cognitors")
         # The persisted file must represent the exact currently running route
         # set; otherwise this node has untracked drift and writes are unsafe.
         from vpn_reconcile import parse_wg_dump

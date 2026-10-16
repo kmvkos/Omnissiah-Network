@@ -27,7 +27,20 @@
         <dt class="col-sm-5">Изменений выполнено</dt><dd class="col-sm-7">0</dd>
         <dt class="col-sm-5">Идентификатор проверки</dt><dd class="col-sm-7"><code>{{ result.revision[:16] }}…</code></dd>
       </dl>
-      <p class="text-muted small mb-0 mt-3">Проверка не резервирует IP и не разрешает последующее применение автоматически. Перед реальным добавлением условия необходимо проверить повторно. Кнопка применения появится в следующем отдельном выпуске.</p>
+      <p class="text-muted small mb-0 mt-3">Проверка не резервирует IP. При применении Magos повторно проверит все условия под блокировкой, сохранит резервную копию и запишет UUID транзакции.</p>
+      {% if draft.status == 'draft' %}
+      <div class="border rounded p-3 mt-3">
+        <h5>Подтверждение изменения</h5>
+        <p class="small text-warning">Добавит только один пир и маршрут /32 на {{ magos.name }}. Требуется свежий снапшот и консоль гипервизора. **Политики доступа к защищаемым объектам пока не применяются:** не подключайте клиента к промышленным сегментам.</p>
+        <form method="post" action="{{ url_for('cognitors.vpn_cognitor_apply', draft_id=draft.id) }}" autocomplete="off">
+          {{ apply_form.hidden_tag() }}
+          <input type="hidden" name="expected_revision" value="{{ result.revision }}">
+          <label class="form-label" for="confirm-name">Для подтверждения введите {{ draft.name }}</label>
+          <input id="confirm-name" class="form-control mb-3" type="text" name="confirm_name" required autocomplete="off">
+          <button type="submit" class="btn btn-warning">Применить клиентский пир на {{ magos.name }}</button>
+        </form>
+      </div>
+      {% endif %}
     {% else %}
       <h5><i class="bi bi-exclamation-triangle me-2"></i>Подключение не готово</h5>
       <p class="text-warning mb-0">{{ problem or 'Неизвестная ошибка' }}</p>

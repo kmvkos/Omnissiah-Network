@@ -150,3 +150,90 @@ def test_duplicate_draft_does_not_override_previous_entry(web):
     assert submit("clientB", KEY2, "10.77.0.5/32").status_code == 200
     with app.app_context():
         assert CognitorDraft.query.count() == 1
+
+def test_admin_apply_requires_csrf_and_exact_confirmation(web, monkeypatch):
+    app, client, admin, _, magos_id = web
+    login(client, admin)
+    with app.app_context():
+        row = CognitorDraft(name="clientApply", vpn_address="10.77.0.5/32",
+                            public_key=KEY, parent_magos_id=magos_id, status="draft")
+        db.session.add(row)
+        db.session.commit()
+        draft_id = row.id
+    import sys
+    from types import SimpleNamespace
+    called = []
+    monkeypatch.setitem(sys.modules, "app", SimpleNamespace(
+        _vpn_v2_send=lambda *args, **kwargs: called.append((args, kwargs)) or
+        {"state": "committed", "client_address": "10.77.0.5/32",
+         "operation_id": kwargs.get("operation_id")}))
+    for data in [
+        {"confirm_name":"clientApply", "expected_revision":"a" * 64},
+        {"csrf_token":"broken", "confirm_name":"clientApply", "expected_revision":"a" * 64},
+        {"csrf_token":csrf(client), "confirm_name":"WrongName", "expected_revision":"a" * 64},
+    ]:
+        result = client.post("/vpn/cognitors/" + str(draft_id) + "/apply", data=data)
+        assert result.status_code in (302, 400)
+    assert called == []
+    with app.app_context():
+        assert db.session.get(CognitorDraft, draft_id).status == "draft"
+    result = client.post("/vpn/cognitors/" + str(draft_id) + "/apply", data={
+        "csrf_token":csrf(client), "confirm_name":"clientApply",
+        "expected_revision":"a" * 64,
+    })
+    assert result.status_code == 302
+    assert len(called) == 1
+    assert called[0][0][1] == "cognitor-add"
+    assert called[0][0][2]["client_address"] == "10.77.0.5/32"
+    assert called[0][0][2]["expected_revision"] == "a" * 64
+    assert len(called[0][1]["operation_id"]) == 36
+    with app.app_context():
+        assert db.session.get(CognitorDraft, draft_id).status == "applied"
+
+
+def test_unknown_remote_apply_outcome_must_not_mark_applied(web, monkeypatch):
+    app, client, admin, _, magos_id = web
+    login(client, admin)
+    with app.app_context():
+        row = CognitorDraft(name="clientUnknown", vpn_address="10.77.0.7/32",
+                            public_key=KEY, parent_magos_id=magos_id, status="draft")
+        db.session.add(row)
+        db.session.commit()
+        draft_id = row.id
+    import sys
+    from types import SimpleNamespace
+    monkeypatch.setitem(sys.modules, "app", SimpleNamespace(
+        _vpn_v2_send=lambda *args, **kwargs: (_ for _ in ()).throw(TimeoutError("no reply"))))
+    response = client.post("/vpn/cognitors/" + str(draft_id) + "/apply", data={
+        "csrf_token":csrf(client), "confirm_name":"clientUnknown",
+        "expected_revision":"a" * 64,
+    })
+    assert response.status_code == 302
+    with app.app_context():
+        assert db.session.get(CognitorDraft, draft_id).status == "draft"
+
+
+def test_handshake_status_must_ignore_other_peers(web, monkeypatch):
+    app, client, admin, _, magos_id = web
+    login(client, admin)
+    with app.app_context():
+        row = CognitorDraft(name="clientStatus", vpn_address="10.77.0.7/32",
+                            public_key=KEY, parent_magos_id=magos_id, status="applied")
+        db.session.add(row)
+        db.session.commit()
+        draft_id = row.id
+    import sys, time
+    from types import SimpleNamespace
+    app.jinja_loader.mapping["vpn_cognitor_status.html"] = (
+        "{% if seen %}{{ seen.installed }}|{{ seen.connected }}|{{ seen.rx_bytes }}{% else %}NONE{% endif %}")
+    now = int(time.time())
+    peers = [{"public_key": KEY2, "allowed_ips": ["10.77.0.9/32"],
+              "latest_handshake": now, "rx_bytes": 1111, "tx_bytes": 2222},
+             {"public_key": KEY, "allowed_ips": ["10.77.0.7/32"],
+              "latest_handshake": now, "rx_bytes": 92, "tx_bytes": 180}]
+    monkeypatch.setitem(sys.modules, "app", SimpleNamespace(
+        _vpn_v2_send=lambda *args, **kwargs: {"active": True, "peers": peers}))
+    response = client.get("/vpn/cognitors/" + str(draft_id) + "/status")
+    assert response.status_code == 200
+    assert "True|True|92" in response.get_data(as_text=True)
+    assert "1111" not in response.get_data(as_text=True)
