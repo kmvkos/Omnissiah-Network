@@ -131,7 +131,13 @@ class AddOnlyBackend:
         if self.before is None:
             raise CognitorTransactionBlocked("Durable backup not staged")
         old = self.before["peers"]
-        if len(desired) != len(old) + 1 or desired[:-1] != old:
+        def stable(peers):
+            return sorted((p["public_key"], tuple(sorted(p["allowed_ips"])),
+                           int(p["keepalive"])) for p in peers)
+        if (len(desired) != len(old) + 1
+                or stable(desired[:-1]) != stable(old)
+                or desired[-1]["public_key"] != self.key
+                or desired[-1]["allowed_ips"] != [self.target]):
             raise CognitorTransactionBlocked("Not a pure add-only peer change")
         self._command(["wg", "set", "wg0", "peer", self.key,
                        "allowed-ips", self.target])
