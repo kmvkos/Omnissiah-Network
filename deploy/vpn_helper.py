@@ -85,6 +85,11 @@ def validate_plan(data, expected_name):
     return data
 
 
+def root_owned_plan(candidate):
+    st = candidate.stat()
+    return candidate.is_file() and st.st_uid == 0 and not (st.st_mode & 0o077)
+
+
 def ensure_keys(state):
     state.mkdir(mode=0o700, parents=True, exist_ok=True)
     secret, public = state / "private.key", state / "public.key"
@@ -175,8 +180,7 @@ def main():
     candidate = args.plan
     if candidate.parent != STATE or candidate.is_symlink():
         raise HelperError("Plan path must be a direct child of root state directory")
-    st = candidate.stat()
-    if not candidate.is_file() or st.st_uid != 0 or st.st_mode & 0o077:
+    if not root_owned_plan(candidate):
         raise HelperError("Plan must be a root-owned 0600 file")
     data = validate_plan(json.loads(candidate.read_text()), args.node_name)
     if args.command == "validate":
