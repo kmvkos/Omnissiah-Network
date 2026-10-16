@@ -1,0 +1,38 @@
+{% extends 'layout.html' %}
+{% block title %}Проверка подключения Cognitor{% endblock %}
+{% block content %}
+<div class="container-fluid">
+  <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <div>
+      <h2><i class="bi bi-shield-check me-2"></i>Проверка подключения Cognitor</h2>
+      <p class="text-muted mb-0">Предпросмотр безопасен: изменения WireGuard и маршрутов не выполняются.</p>
+    </div>
+    <a class="btn btn-outline-modern" href="{{ url_for('cognitors.vpn_cognitors') }}">← VPN-клиенты</a>
+  </div>
+  <div class="premium-card p-4 mb-4">
+    <h5 class="mb-3">Клиент {{ draft.name }}</h5>
+    <dl class="row mb-0">
+      <dt class="col-sm-4">Адрес</dt><dd class="col-sm-8"><code>{{ draft.vpn_address }}</code></dd>
+      <dt class="col-sm-4">Родительский Magos</dt><dd class="col-sm-8">{{ magos.name }}</dd>
+      <dt class="col-sm-4">Статус регистрации</dt><dd class="col-sm-8">{{ 'Черновик' if draft.status == 'draft' else 'Ожидает проверки' }}</dd>
+    </dl>
+  </div>
+  <div class="premium-card p-4">
+    {% if result %}
+      <h5><i class="bi bi-check-circle me-2"></i>Предварительная проверка пройдена</h5>
+      <p>На <strong>{{ magos.name }}</strong> сейчас нет конфликта адресов или ключей. Конфигурация WireGuard на диске соответствует работающим пирам.</p>
+      <dl class="row mb-0">
+        <dt class="col-sm-5">Тип изменения</dt><dd class="col-sm-7">Добавление одного пира (без удаления существующих)</dd>
+        <dt class="col-sm-5">Уже подключено пиров</dt><dd class="col-sm-7">{{ result.existing_peers }}</dd>
+        <dt class="col-sm-5">Изменений выполнено</dt><dd class="col-sm-7">0</dd>
+        <dt class="col-sm-5">Идентификатор проверки</dt><dd class="col-sm-7"><code>{{ result.revision[:16] }}…</code></dd>
+      </dl>
+      <p class="text-muted small mb-0 mt-3">Проверка не резервирует IP и не разрешает последующее применение автоматически. Перед реальным добавлением условия необходимо проверить повторно. Кнопка применения появится в следующем отдельном выпуске.</p>
+    {% else %}
+      <h5><i class="bi bi-exclamation-triangle me-2"></i>Подключение не готово</h5>
+      <p class="text-warning mb-0">{{ problem or 'Неизвестная ошибка' }}</p>
+      <p class="small text-muted mt-2">Никаких изменений на Magos и Cognitor не выполнялось.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

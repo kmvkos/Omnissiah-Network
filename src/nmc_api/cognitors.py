@@ -80,3 +80,54 @@ def vpn_cognitors():
 
     drafts = CognitorDraft.query.order_by(CognitorDraft.created_at.desc()).all()
     return render_template("vpn_cognitors.html", form=form, drafts=drafts, magos=magos)
+
+
+@cognitors_bp.route("/vpn/cognitors/<int:draft_id>/preview", methods=["GET"])
+@login_required
+def vpn_cognitor_preview(draft_id):
+    """Read-only remote preflight over controller-authenticated mTLS.
+
+    This does NOT install the peer, claim a route or change draft status.
+    """
+    if current_user.role != "admin":
+        abort(403)
+    draft = db.session.get(CognitorDraft, draft_id)
+    if draft is None:
+        abort(404)
+    magos = db.session.get(General, draft.parent_magos_id)
+    if magos is None or magos.role != "Magos":
+        abort(409)
+    plan = {
+        "node_name": magos.name,
+        "address": magos.ip_pool,
+        "client_name": draft.name,
+        "client_address": draft.vpn_address,
+        "public_key": draft.public_key,
+    }
+    result = None
+    problem = None
+    try:
+        # Delayed import prevents circular startup dependency.
+        from app import _vpn_v2_send
+        result = _vpn_v2_send(magos, "cognitor-preview", plan)
+        if (not isinstance(result, dict)
+                or result.get("writes_performed") is not False
+                or result.get("safe_to_plan") is not True
+                or result.get("action") != "add_only"
+                or result.get("parent_node") != magos.name
+                or result.get("client_address") != draft.vpn_address
+                or result.get("client_name") != draft.name
+                or not isinstance(result.get("revision"), str)
+                or len(result["revision"]) != 64):
+            result = None
+            problem = "Magos вернул неподтверждённый результат проверки"
+    except Exception:
+        # No low-level exception, private key or unmanaged peer metadata in UI.
+        import logging
+        logging.getLogger(__name__).warning(
+            "Read-only Cognitor admission rejected for draft id %d at %s",
+            draft.id, magos.name, exc_info=True)
+        problem = ("Не удалось выполнить проверку на Magos. "
+                   "Проверьте mTLS, службу локального RPC, WireGuard и системный журнал.")
+    return render_template("vpn_cognitor_preview.html", draft=draft,
+                           magos=magos, result=result, problem=problem)
