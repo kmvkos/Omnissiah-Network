@@ -119,8 +119,37 @@ class IsolatedLinuxMeshBackend:
 
     def stage_backup(self):
         self._require_enabled()
-        if self._backup.exists() or self._backup.is_symlink():
-            raise TransactionBlocked("Unresolved backup already present; manual recovery required")
+        if self._backup.is_symlink():
+            raise TransactionBlocked("Symlink backup refused")
+        if self._backup.exists():
+            # A prior completed transaction must not block the next planned
+            # change. Keep its secret-containing backup, but never rotate an
+            # unresolved transaction or a malformed/tampered backup.
+            from vpn_route_executor_sim import _load_journal
+            journal = _load_journal(self._state / "mesh-transaction.json")
+            if not isinstance(journal, dict) or journal.get("state") not in ("committed", "rolled_back"):
+                raise TransactionBlocked("Unresolved backup already present; manual recovery required")
+            if self._backup.stat().st_uid != 0 or self._backup.stat().st_mode & 0o077:
+                raise TransactionBlocked("Unsafe previous backup permissions")
+            try:
+                previous = json.loads(self._backup.read_text())
+                if not isinstance(previous, dict) or previous.get("sha256") != _digest(previous.get("data")):
+                    raise ValueError("Invalid backup digest")
+                if previous["data"]["snapshot_sha256"] != journal.get("snapshot_sha256"):
+                    raise ValueError("Backup and journal do not match")
+            except (KeyError, TypeError, ValueError) as exc:
+                raise TransactionBlocked("Previous backup is invalid; manual recovery required") from exc
+            # Preserve history with restrictive permissions, using O_EXCL to
+            # avoid collisions and symlink targets. No backup bytes in logs.
+            import uuid
+            archive = self._state / ("mesh-backup-" + uuid.uuid4().hex + ".json")
+            os.link(self._backup, archive, follow_symlinks=False)
+            self._backup.unlink()
+            directory_fd = os.open(self._state, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
         old_file = self._config_bytes().decode()
         previous_wg = self._command(["wg", "showconf", "wg0"])
         peers, routes = self.snapshot()
