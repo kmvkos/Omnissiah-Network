@@ -4,10 +4,11 @@
 a working WireGuard link. Do not reinitialise their keys, prepare their
 running wg0 as a fresh interface, or replace their configuration by hand.
 
-This document records the required read-only gates and the **intended** test
-sequence; it is not permission to enable the experimental route transactions.
-The UI does not yet expose this new operation, and its three execution flags
-remain disabled by default.
+This document records the read-only gates and the intended lab test sequence.
+The VPN overview now displays a per-node transactional apply button after a
+valid preview, but **only when the controller explicitly enables this feature**.
+New installations keep all three execution gates disabled by default. It is not
+permission to enable transactions without completing the remaining live tests.
 
 ## Trusted environment and expected design
 
@@ -18,8 +19,18 @@ remain disabled by default.
 * The new root RPC service receives all management IPs from the deployment
   inventory via OMNISSIAH_PROTECTED_MANAGEMENT_IPV4. HTTP plans cannot change
   these addresses. No transaction feature flag is enabled at install.
-* Controller, Magos and privileged helper each require independent opt-in
-  before the route-transaction verb can run.
+* Controller opt-in: `VPN_ROUTE_TRANSACTIONS_ENABLED=YES` in the
+  controller application environment. Disabled by default.
+* Agent opt-in: boolean inventory variable
+  `omnissiah_vpn_route_transactions_agent_enabled: true` for the Magos.
+  Disabled by default.
+* Privileged helper opt-in: boolean inventory variable
+  `omnissiah_vpn_route_transactions_root_enabled: true` for the Magos.
+  Disabled by default. Root service obtains this through systemd; do not edit
+  its unit on a Magos by hand.
+* The helper checks effective route-to-management and peer endpoint paths
+  before and after writes (including policy routing); a changed path rejects
+  the transaction and triggers local rollback.
 * Standard `apply` still refuses route-set changes. Do not use it to add Magos03.
 
 ## First: verify baseline without writes
@@ -70,10 +81,16 @@ sudo systemctl show omnissiah-vpn-rpc.service -p Environment
 Confirm `OMNISSIAH_PROTECTED_MANAGEMENT_IPV4` lists *all* management IPs.
 The output must **not** include `OMNISSIAH_ENABLE_ROUTE_TRANSACTIONS=YES`.
 
-## Later supervised, explicit live test (NOT YET AUTHORIZED)
+## Later supervised, explicit live test (requires separate approval)
 
-Once rollback, revision fencing and management-path verification are accepted,
-the intended sequence is:
+The existing UI under **VPN-сеть → Preview Changes** supports the new
+`Применить маршруты` action on a node only when all preliminary checks
+succeed and the controller has enabled the feature. It requires confirmation,
+node-name entry and the exact desired-plan revision returned by Preview.
+The root helper also independently rechecks the live kernel state under lock.
+
+Before enabling the three independent gates, review remaining risks below.
+The intended sequence is:
 
 1. Read-only preview for all nodes. Initialise *Magos03's* key if absent; do not
    rotate Magos01 or Magos02 keys.
@@ -99,10 +116,14 @@ under a documented recovery process.
 
 ## Mandatory remaining work
 
-* Management-path pre/post verification and explicit route fencing against
-  policy routing, not just the current main-table comparison.
-* Crash/power-loss recovery and bounded helper timeouts.
-* Revision fencing against updates to desired state between preview and apply.
-* Verify all three nodes from actual Debian 13 VMs and both success/failure
-  scenarios. Local transactions are not atomic across the three Magos.
-* A reviewed UI workflow with explicit per-node confirmations and audit entries.
+* Crash/power-loss recovery is not automatic. A journal can remain unresolved
+  after sudden process termination or VM power failure; restore only with
+  on-console review and a known-good snapshot.
+* The current helper timeout and service restart behavior require a reviewed
+  failure-injection test on real lab VMs.
+* Desired plan revision and kernel state are rechecked, but controller-wide
+  distributed locking across all Magos is not implemented.
+* Verify all three Debian 13 VMs in both normal and failure scenarios.
+  Per-node transactions are not atomic across the full mesh.
+* Per-operation persistent audit records and central progress tracking are
+  not yet implemented; the web UI reports each individual result.
