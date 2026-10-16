@@ -4,7 +4,7 @@ on:
     paths:
       - 'src/nmc_api/cognitors.py'
       - 'deploy/vpn_cognitor_preview.py'
-      - 'deploy/vpn_cognitor_transaction.py scripts/cognitor_debian_setup.py'
+      - 'deploy/vpn_cognitor_transaction.py'
       - 'scripts/cognitor_debian_setup.py'
       - 'deploy/vpn_rpc.py'
       - 'deploy/vpn_helper.py'
@@ -20,7 +20,7 @@ on:
       - 'tests/test_vpn_cognitor_blueprint.py'
       - 'tests/test_vpn_cognitor_validation.py'
       - 'tests/test_vpn_cognitor_preview.py'
-      - 'tests/test_vpn_cognitor_transaction.py tests/test_cognitor_debian_setup.py'
+      - 'tests/test_vpn_cognitor_transaction.py'
       - 'tests/test_cognitor_debian_setup.py'
       - '.github/workflows/vpn-cognitor.yml'
   workflow_dispatch:
@@ -38,6 +38,6 @@ jobs:
       - name: Install controller dependencies
         run: python -m pip install -r requirements.txt pytest
       - name: Check module syntax
-        run: python -m compileall -q src/nmc_api/cognitors.py src/vpn_cognitor_models.py src/vpn_cognitor_validation.py deploy/vpn_cognitor_preview.py deploy/vpn_cognitor_transaction.py deploy/vpn_helper.py deploy/vpn_rpc.py agents/app/agent.py agents/app/vpn_client.py
+        run: python -m compileall -q src/nmc_api/cognitors.py src/vpn_cognitor_models.py src/vpn_cognitor_validation.py deploy/vpn_cognitor_preview.py deploy/vpn_cognitor_transaction.py scripts/cognitor_debian_setup.py deploy/vpn_helper.py deploy/vpn_rpc.py agents/app/agent.py agents/app/vpn_client.py
       - name: Test database registration, CSRF and address admission
-        run: python -m pytest -q tests/test_vpn_cognitor_blueprint.py tests/test_vpn_cognitor_validation.py tests/test_vpn_cognitor_preview.py tests/test_vpn_cognitor_transaction.py
+        run: python -m pytest -q tests/test_vpn_cognitor_blueprint.py tests/test_vpn_cognitor_validation.py tests/test_vpn_cognitor_preview.py tests/test_vpn_cognitor_transaction.py tests/test_cognitor_debian_setup.py
