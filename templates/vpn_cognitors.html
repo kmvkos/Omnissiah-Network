@@ -33,7 +33,7 @@
 
   <div class="premium-card p-4 mb-4">
     <h5 class="mb-3">Создать черновик Cognitor</h5>
-    <form action="{{ url_for('vpn_cognitors') }}" method="post" class="row g-3" autocomplete="off">
+    <form action="{{ url_for('cognitors.vpn_cognitors') }}" method="post" class="row g-3" autocomplete="off">
       {{ form.hidden_tag() }}
       <div class="col-12 col-lg-6">
         {{ form.name.label(class="form-label") }}
@@ -48,12 +48,12 @@
       <div class="col-12 col-lg-6">
         {{ form.vpn_address.label(class="form-label") }}
         {{ form.vpn_address(class="form-control", placeholder="10.77.0.5/32") }}
-        <div class="form-text text-muted">Только свободный IPv4-адрес /32 внутри VPN-пула. Магосы уже используют 10.77.0.2–10.77.0.4.</div>
+        <div class="form-text text-muted">Только свободный IPv4-адрес /32 внутри VPN-пула. Ранее занятые адреса определяются по реестру узлов автоматически.</div>
         {% for error in form.vpn_address.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
       </div>
       <div class="col-12 col-lg-6">
         {{ form.public_key.label(class="form-label") }}
-        {{ form.public_key(class="form-control", placeholder="WireGuard public key (base64)", maxlength="44", spellcheck="false", autocapitalize="off") }}
+        {{ form.public_key(class="form-control", placeholder="Публичный ключ WireGuard (Base64)", maxlength="44", spellcheck="false", autocapitalize="off") }}
         <div class="form-text text-muted">Не вставляйте приватный ключ. Omnissiah хранит только публичную часть.</div>
         {% for error in form.public_key.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
       </div>
