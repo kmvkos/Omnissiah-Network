@@ -19,8 +19,10 @@ permission to enable transactions without completing the remaining live tests.
 * The new root RPC service receives all management IPs from the deployment
   inventory via OMNISSIAH_PROTECTED_MANAGEMENT_IPV4. HTTP plans cannot change
   these addresses. No transaction feature flag is enabled at install.
-* Controller opt-in: `VPN_ROUTE_TRANSACTIONS_ENABLED=YES` in the
-  controller application environment. Disabled by default.
+* Controller opt-in: `omnissiah_vpn_route_transactions_controller_enabled: true`
+  on Omni01 in the Ansible inventory. The controller bootstrap persists
+  `VPN_ROUTE_TRANSACTIONS_ENABLED=YES` to its private environment file.
+  Disabled by default; leave false unless approving this lab stage.
 * Agent opt-in: boolean inventory variable
   `omnissiah_vpn_route_transactions_agent_enabled: true` for the Magos.
   Disabled by default.
@@ -127,3 +129,45 @@ under a documented recovery process.
   Per-node transactions are not atomic across the full mesh.
 * Per-operation persistent audit records and central progress tracking are
   not yet implemented; the web UI reports each individual result.
+
+## Controlled feature enablement — prepared Magos03 lab only
+
+The current lab has already prepared Magos03 with two peers, but its WireGuard
+interface is still **inactive**. Magos01 and Magos02 remain directly linked.
+The desired links to Magos03 are saved and Preview validates one new route
+on each existing Magos.
+
+When the operator has reviewed remaining failure risks and approves the lab
+transaction, set only these host-level inventory switches:
+
+```yaml
+omnissiah:
+  hosts:
+    omni01:
+      omnissiah_vpn_route_transactions_controller_enabled: true
+
+magos:
+  hosts:
+    magos01:
+      omnissiah_vpn_route_transactions_agent_enabled: true
+      omnissiah_vpn_route_transactions_root_enabled: true
+    magos02:
+      omnissiah_vpn_route_transactions_agent_enabled: true
+      omnissiah_vpn_route_transactions_root_enabled: true
+    magos03:
+      # Both default false; never route-transact while wg0 is inactive.
+```
+
+Merge the booleans into the existing `ansible/inventory.yml`; do not replace
+existing ansible_host, VPN addresses, SSH settings, or credentials.
+`control-install.sh --update` propagates the switches. Check the installed
+application and root service are healthy; do not click Apply until the
+preflight reports only one expected new /32 route per active Magos.
+
+Apply **one Magos at a time** from the VPN Overview preview; inspect result
+and old peer handshake before proceeding to the next node.
+Do not run route transactions on Magos03: with its inactive interface, the
+existing Prepare / Enable VPN lifecycle is the correct separate path.
+
+The route transaction feature is not covered by automatic crash recovery or
+atomic multi-node activation; use only with VM snapshots and console recovery.
