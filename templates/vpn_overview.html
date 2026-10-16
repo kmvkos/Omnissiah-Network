@@ -49,6 +49,20 @@
       </table>
     </div>
   </div>
+  <div class="premium-card p-4 mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <div><h5 class="mb-1">Preview Changes</h5>
+      <p class="text-muted small mb-0">Предварительная проверка. Не меняет конфигурации, интерфейсы или маршруты.</p></div>
+      <button class="btn btn-outline-modern" id="vpnPreviewBtn" type="button" onclick="vpnPreviewChanges()">Показать изменения</button>
+    </div>
+    <div role="status" class="small text-muted mb-3" id="vpnPreviewMessage">Сначала выполните предпросмотр.</div>
+    <div class="table-responsive">
+      <table class="table table-dark premium-table">
+        <thead><tr><th>Magos</th><th>Добавить</th><th>Удалить</th><th>Изменить</th><th>Возможность применения</th></tr></thead>
+        <tbody id="vpnPreviewRows"><tr><td colspan="5" class="text-center text-muted">Проверка ещё не запускалась</td></tr></tbody>
+      </table>
+    </div>
+  </div>
   <div class="premium-card p-4">
     <h5 class="mb-3">Желаемые VPN-связи</h5>
     <p class="text-muted small">Список отражает записи контроллера, а не факт прохождения трафика. Для каждого соединения проверяйте handshake на узлах.</p>
@@ -68,6 +82,44 @@
 </div>
 {% endblock %}
 {% block scripts %}
+<script>
+async function vpnPreviewChanges() {
+  const button = document.getElementById('vpnPreviewBtn');
+  const message = document.getElementById('vpnPreviewMessage');
+  const target = document.getElementById('vpnPreviewRows');
+  button.disabled = true;
+  message.textContent = 'Проверяю фактическое состояние Magos...';
+  try {
+    const response = await fetch('{{ url_for("vpn_mesh_change_preview") }}', {
+      credentials: 'same-origin', cache: 'no-store'
+    });
+    if (!(response.headers.get('content-type') || '').includes('application/json')) {
+      throw Error('HTTP ' + response.status + ': сервер ответил не JSON');
+    }
+    const data = await response.json();
+    if (!response.ok) throw Error(data.error || 'HTTP ' + response.status);
+    target.replaceChildren();
+    for (const item of data.results) {
+      const row = document.createElement('tr');
+      const verdict = item.decision === 'no_change' ? 'Без изменений'
+        : item.decision === 'eligible' ? 'Можно подготовить к применению'
+        : 'Заблокировано: ' + item.reason;
+      for (const value of [item.node_name, item.add, item.remove, item.update, verdict]) {
+        const td = document.createElement('td');
+        td.textContent = String(value);
+        row.appendChild(td);
+      }
+      target.appendChild(row);
+    }
+    message.textContent = 'Предпросмотр выполнен. Применение изменений не выполнялось.';
+  } catch (error) {
+    message.textContent = 'Ошибка предпросмотра: ' + error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+</script>
+
 <script>
 async function checkVpnDrift() {
   const btn = document.getElementById('vpnReconcileBtn');
