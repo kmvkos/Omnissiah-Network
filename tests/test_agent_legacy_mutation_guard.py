@@ -28,11 +28,12 @@ def _guard(config, path):
         "request": SimpleNamespace(path=path),
         "jsonify": lambda **data: data,
     }
-    exec(compile(ast.Module(body=[
+    module = ast.Module(body=[
         ast.Assign(targets=[ast.Name(id="_LEGACY_WRITE_PATHS", ctx=ast.Store())],
                    value=paths),
         fn,
-    ], type_ignores=[]), str(ROOT / "agents/app/agent.py"), "exec"), namespace)
+    ], type_ignores=[])
+    exec(compile(ast.fix_missing_locations(module), str(ROOT / "agents/app/agent.py"), "exec"), namespace)
     return namespace["require_controller_identity"]()
 
 
