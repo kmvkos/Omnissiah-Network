@@ -41,3 +41,13 @@ def test_controller_reads_magos_observations_not_its_own_wg_dump():
     section = source.split("def dashboard():", 1)[1].split("def get_interfaces_with_ips(", 1)[0]
     assert "peer_status(magos)" in section
     assert '["wg", "show", "all", "dump"]' not in section
+
+def test_vpn_reconcile_script_is_emitted_in_script_block_not_title():
+    """A JS function inside the title block renders as inert title text."""
+    source = (ROOT / "templates/vpn_overview.html").read_text()
+    title = source.split("{% block title %}", 1)[1].split("{% endblock %}", 1)[0]
+    script = source.split("{% block scripts %}", 1)[1].split("{% endblock %}", 1)[0]
+    assert "<script" not in title
+    assert "checkVpnDrift" not in title
+    assert "async function checkVpnDrift()" in script
+    assert "url_for(\"reconcile_vpn_mesh\")" in script
