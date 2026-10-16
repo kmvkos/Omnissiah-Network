@@ -3117,7 +3117,24 @@ def vpn_mesh_operation():
                               for peer in selected["peers"]]}
             if not plan["peers"]:
                 return jsonify(error="No explicit Magos links configured"), 409
+        if action == "apply":
+            # Recheck eligibility immediately before the privileged write.
+            from vpn_change_preview import preview as preview_change
+            from vpn_reconcile import compare
+            observed_before = _vpn_v2_send(node, "status")
+            decision = preview_change(plan["peers"], observed_before.get("peers"),
+                                      active=observed_before.get("active") is True)
+            if decision["decision"] != "eligible":
+                return jsonify(error="Apply refused by live preflight", preflight=decision), 409
         result = _vpn_v2_send(node, action, plan)
+        if action == "apply":
+            from vpn_reconcile import compare
+            observed_after = _vpn_v2_send(node, "status")
+            verification = compare(plan["peers"], observed_after.get("peers"))
+            if verification["state"] != "in_sync":
+                app.logger.error("VPN apply verification mismatch for %s", node.name)
+                return jsonify(error="Apply returned but postflight is not in sync; manual investigation required",
+                               verification=verification["state"]), 502
         if action == "identity":
             new_key = result.get("public_key")
             if not isinstance(new_key, str):
@@ -3140,6 +3157,38 @@ def vpn_mesh_operation():
         db.session.rollback()
         app.logger.error("VPN v2 %s failed for %s: %s", action, node.name, exc)
         return jsonify(error="VPN control call failed; check service and TLS logs"), 502
+
+
+@app.route('/api/v2/vpn/mesh/change-preview', methods=['GET'])
+@login_required
+@admin_required
+@require_omnissiah
+def vpn_mesh_change_preview():
+    """Dry run only. No key disclosure, persistence or WireGuard writes."""
+    from vpn_topology import project_magos_mesh
+    from vpn_plan import VPNPlanError
+    from vpn_change_preview import preview
+    nodes = General.query.filter_by(role='Magos').all()
+    by_id = {node.id: node for node in nodes}
+    try:
+        plans = project_magos_mesh(nodes, NodeConnection.query.all())
+    except VPNPlanError as exc:
+        return jsonify(error=str(exc)), 409
+    results = []
+    for plan in plans:
+        try:
+            observation = _vpn_v2_send(by_id[plan["node_id"]], "status")
+            result = preview(plan["peers"], observation.get("peers"),
+                             active=observation.get("active") is True)
+        except (ValueError, requests.RequestException, OSError, KeyError, RuntimeError) as exc:
+            app.logger.warning("VPN dry-run observation failed for %s: %s",
+                               plan["node_name"], exc)
+            result = {"decision": "blocked", "reason": "management_query_failed",
+                      "add": 0, "remove": 0, "update": 0}
+        results.append({"node_id": plan["node_id"],
+                        "node_name": plan["node_name"], **result})
+    # This endpoint is NOT a commit authorization. It returns no sensitive keys.
+    return jsonify(results=results, writes_performed=False)
 
 
 @app.route('/api/v2/vpn/mesh/reconcile', methods=['GET'])

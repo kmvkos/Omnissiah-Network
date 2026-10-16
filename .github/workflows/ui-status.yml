@@ -10,6 +10,9 @@ on:
       - 'tests/test_vpn_reconcile.py'
       - 'deploy/vpn_reconcile.py'
       - 'src/vpn_reconcile.py'
+      - 'src/vpn_change_preview.py'
+      - 'tests/test_vpn_change_preview.py'
+      - 'tests/test_vpn_safe_apply.py'
       - 'deploy/vpn_helper.py'
       - '.github/workflows/ui-status.yml'
 jobs:
@@ -21,5 +24,5 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install pytest jinja2
-      - run: python -m compileall -q agents/app/heartbeat.py src/nmc_api/heartbeat.py src/app.py src/vpn_reconcile.py deploy/vpn_reconcile.py deploy/vpn_helper.py
-      - run: python -m pytest -q tests/test_ui_status.py tests/test_vpn_reconcile.py
+      - run: python -m compileall -q agents/app/heartbeat.py src/nmc_api/heartbeat.py src/app.py src/vpn_reconcile.py src/vpn_change_preview.py deploy/vpn_reconcile.py deploy/vpn_helper.py
+      - run: python -m pytest -q tests/test_ui_status.py tests/test_vpn_reconcile.py tests/test_vpn_change_preview.py tests/test_vpn_safe_apply.py
