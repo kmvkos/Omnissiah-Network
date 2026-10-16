@@ -31,7 +31,7 @@
       {% if draft.status == 'draft' %}
       <div class="border rounded p-3 mt-3">
         <h5>Подтверждение изменения</h5>
-        <p class="small text-warning">Добавит только один новый VPN-пир и маршрут /32 на {{ magos.name }}. Работающий Full Mesh не должен измениться. Требуется свежий снимок ВМ и доступ к консоли гипервизора.</p>
+        <p class="small text-warning">Добавит только один пир и маршрут /32 на {{ magos.name }}. Требуется свежий снапшот и консоль гипервизора. **Политики доступа к защищаемым объектам пока не применяются:** не подключайте клиента к промышленным сегментам.</p>
         <form method="post" action="{{ url_for('cognitors.vpn_cognitor_apply', draft_id=draft.id) }}" autocomplete="off">
           {{ apply_form.hidden_tag() }}
           <input type="hidden" name="expected_revision" value="{{ result.revision }}">
