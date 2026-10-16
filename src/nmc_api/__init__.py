@@ -8,13 +8,15 @@ from .nodes import nodes_bp
 from .heartbeat import heartbeat_bp
 from .peers import peers_bp
 from .traffic import traffic_bp
+from .cognitors import cognitors_bp
 
 # Список всех Blueprints для регистрации
 api_blueprints = [
     nodes_bp,
     heartbeat_bp,
     peers_bp,
-    traffic_bp
+    traffic_bp,
+    cognitors_bp
 ]
 
 __all__ = [
@@ -22,5 +24,6 @@ __all__ = [
     'heartbeat_bp',
     'peers_bp',
     'traffic_bp',
+    'cognitors_bp',
     'api_blueprints'
 ]
