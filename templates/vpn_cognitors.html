@@ -1,0 +1,100 @@
+{% extends 'layout.html' %}
+{% block title %}Cognitor — VPN-клиенты{% endblock %}
+{% block content %}
+<div class="container-fluid">
+  <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <div>
+      <h2><i class="bi bi-person-badge me-2"></i>Cognitor — VPN-клиенты</h2>
+      <p class="text-muted mb-0">Клиент подключается к выбранному Magos. Omnissiah управляет регистрацией, но не передаёт пользовательский трафик.</p>
+    </div>
+    <a class="btn btn-outline-modern" href="{{ url_for('vpn_overview') }}">← Вернуться к VPN-сети</a>
+  </div>
+
+  <div class="premium-card p-4 mb-4">
+    <h5>Как будет подключаться Cognitor</h5>
+    <div class="row g-3 mt-2">
+      <div class="col-12 col-md-4"><div class="border rounded p-3 h-100">
+        <strong>1. Регистрация</strong>
+        <p class="small text-muted mb-0">Выберите Magos и выделите свободный VPN-адрес. Добавьте публичный ключ, созданный на устройстве клиента.</p>
+      </div></div>
+      <div class="col-12 col-md-4"><div class="border rounded p-3 h-100">
+        <strong>2. Проверка и применение</strong>
+        <p class="small text-muted mb-0">На следующем этапе Omnissiah проверит изменения и передаст peer Magos через mTLS. Пока эта операция недоступна.</p>
+      </div></div>
+      <div class="col-12 col-md-4"><div class="border rounded p-3 h-100">
+        <strong>3. Доступ к ресурсам</strong>
+        <p class="small text-muted mb-0">Подключение к VPN само по себе не предоставляет доступ к защищаемым серверам и подсетям. Доступ выдаётся отдельной политикой.</p>
+      </div></div>
+    </div>
+    <p class="small text-warning mt-3 mb-0"><i class="bi bi-exclamation-triangle me-1"></i>
+      Сейчас доступно только сохранение черновика. Оно не меняет WireGuard, маршруты или межсетевой экран. Конфигурацию клиента пока нельзя скачать.
+    </p>
+  </div>
+
+  <div class="premium-card p-4 mb-4">
+    <h5 class="mb-3">Создать черновик Cognitor</h5>
+    <form action="{{ url_for('vpn_cognitors') }}" method="post" class="row g-3" autocomplete="off">
+      {{ form.hidden_tag() }}
+      <div class="col-12 col-lg-6">
+        {{ form.name.label(class="form-label") }}
+        {{ form.name(class="form-control", placeholder="cognitor-workstation", maxlength="50") }}
+        {% for error in form.name.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="col-12 col-lg-6">
+        {{ form.parent_magos_id.label(class="form-label") }}
+        {{ form.parent_magos_id(class="form-select") }}
+        {% for error in form.parent_magos_id.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="col-12 col-lg-6">
+        {{ form.vpn_address.label(class="form-label") }}
+        {{ form.vpn_address(class="form-control", placeholder="10.77.0.5/32") }}
+        <div class="form-text text-muted">Только свободный IPv4-адрес /32 внутри VPN-пула. Магосы уже используют 10.77.0.2–10.77.0.4.</div>
+        {% for error in form.vpn_address.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="col-12 col-lg-6">
+        {{ form.public_key.label(class="form-label") }}
+        {{ form.public_key(class="form-control", placeholder="WireGuard public key (base64)", maxlength="44", spellcheck="false", autocapitalize="off") }}
+        <div class="form-text text-muted">Не вставляйте приватный ключ. Omnissiah хранит только публичную часть.</div>
+        {% for error in form.public_key.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="col-12">
+        <details>
+          <summary>Как получить публичный ключ на Linux-клиенте?</summary>
+          <p class="small text-muted mt-2">На самом клиентском устройстве, при установленном WireGuard:</p>
+          <pre class="rounded border p-3"><code>umask 077
+wg genkey &gt; cognitor-private.key
+wg pubkey &lt; cognitor-private.key</code></pre>
+          <p class="small text-muted mb-0">Сохраните <code>cognitor-private.key</code> только на клиенте. В форму вставьте строку, выведенную последней командой.</p>
+        </details>
+      </div>
+      <div class="col-12">
+        {{ form.submit(class="btn btn-outline-modern", disabled=(not magos)) }}
+        {% if not magos %}<span class="text-warning small ms-2">Сначала зарегистрируйте хотя бы один Magos.</span>{% endif %}
+      </div>
+    </form>
+  </div>
+
+  <div class="premium-card p-4">
+    <h5 class="mb-2">Зарегистрированные Cognitor</h5>
+    <p class="small text-muted">Этот список показывает лишь заявки на подключение. Статус «Черновик» не означает, что WireGuard-туннель работает.</p>
+    <div class="table-responsive">
+      <table class="table table-dark premium-table">
+        <thead><tr><th>Клиент</th><th>VPN-адрес</th><th>Родительский Magos</th><th>Статус</th><th>Действие</th></tr></thead>
+        <tbody>
+          {% for draft in drafts %}
+          <tr>
+            <td><strong>{{ draft.name }}</strong></td>
+            <td><code>{{ draft.vpn_address }}</code></td>
+            <td>{{ draft.parent_magos.name if draft.parent_magos else 'Неизвестен' }}</td>
+            <td><span class="badge bg-secondary">{{ 'Черновик' if draft.status == 'draft' else 'Требует проверки' }}</span></td>
+            <td><span class="text-muted small">Применение пока недоступно</span></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="text-muted text-center">Cognitor ещё не зарегистрированы</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
