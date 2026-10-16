@@ -7,7 +7,7 @@ SOCKET = "/run/omnissiah-vpn/control.sock"
 MAX_BYTES = 65536
 
 
-def request_helper(action, *, plan=None, node_name=None):
+def request_helper(action, *, plan=None, node_name=None, operation_id=None):
     if action not in ("identity", "status", "prepare", "start", "apply", "route-preview", "route-transaction", "transaction-status"):
         raise ValueError("Unsupported VPN action")
     message = {"action": action}
@@ -15,6 +15,8 @@ def request_helper(action, *, plan=None, node_name=None):
         message["node_name"] = node_name
     if plan is not None:
         message["plan"] = plan
+    if operation_id is not None:
+        message["operation_id"] = operation_id
     payload = json.dumps(message, separators=(",", ":")).encode()
     if len(payload) > MAX_BYTES:
         raise ValueError("VPN plan too large")

@@ -10,6 +10,7 @@ import sys
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "deploy"))
 spec = importlib.util.spec_from_file_location(
     "vpn_transaction_health", ROOT / "deploy/vpn_transaction_health.py")
 module = importlib.util.module_from_spec(spec)
@@ -175,3 +176,50 @@ def test_orphan_backup_without_lock_is_not_reported_idle(tmp_path):
     assert result["reason"] == "orphan_backup"
     assert result["needs_attention"] is True
     assert not (folder / "mesh-transaction.lock").exists()
+
+
+
+def test_orphan_operation_reservation_is_never_reported_idle(tmp_path):
+    from uuid import uuid4
+    from vpn_operation_fence import reserve
+    folder = root_dir(tmp_path)
+    op_id = str(uuid4())
+    reserve(folder, op_id, {"iface": "wg0"}, [])
+    result = module.inspect_transaction(folder)
+    assert result["state"] == "recovery_required"
+    assert result["reason"] in ("orphan_operation", "missing_lock_file")
+    assert result["needs_attention"] is True
+
+
+def test_terminal_journal_with_unsettled_operation_requires_review(tmp_path):
+    from uuid import uuid4
+    from vpn_operation_fence import reserve
+    folder = root_dir(tmp_path)
+    record(folder, "committed")
+    op_id = str(uuid4())
+    reserve(folder, op_id, {"iface": "wg0"}, [])
+    path = folder / "mesh-transaction.json"
+    data = json.loads(path.read_text())
+    data["operation_id"] = op_id
+    path.write_text(json.dumps(data))
+    result = module.inspect_transaction(folder)
+    assert result["reason"] == "unsettled_operation_ledger"
+    assert result["needs_attention"] is True
+
+
+def test_committed_operation_visible_with_its_sanitized_id(tmp_path):
+    from uuid import uuid4
+    from vpn_operation_fence import reserve, finish
+    folder = root_dir(tmp_path)
+    record(folder, "committed")
+    op_id = str(uuid4())
+    reserve(folder, op_id, {"iface": "wg0"}, [])
+    finish(folder, op_id, "committed")
+    path = folder / "mesh-transaction.json"
+    data = json.loads(path.read_text())
+    data["operation_id"] = op_id
+    path.write_text(json.dumps(data))
+    result = module.inspect_transaction(folder)
+    assert result["state"] == "committed"
+    assert result["operation_id"] == op_id
+    assert result["needs_attention"] is False

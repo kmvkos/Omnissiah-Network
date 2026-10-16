@@ -140,7 +140,13 @@ def main():
     parser.add_argument("command", choices=["identity", "validate", "prepare", "start", "apply", "status", "route-preview", "route-transaction", "transaction-status"])
     parser.add_argument("--node-name", required=True)
     parser.add_argument("--plan", type=Path)
+    parser.add_argument("--operation-id")
     args = parser.parse_args()
+    if args.command == "route-transaction":
+        from vpn_operation_fence import validate_operation_id
+        validate_operation_id(args.operation_id)
+    elif args.operation_id is not None:
+        parser.error("--operation-id is only valid for route-transaction")
     if not args.node_name or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for c in args.node_name):
         parser.error("Invalid node name")
     if os.geteuid() != 0:
@@ -249,7 +255,8 @@ def main():
             protected_addresses=management_addresses + endpoint_addresses)
         try:
             result = run_offline_mesh_transaction(
-                transaction, data["peers"], backend, STATE)
+                transaction, data["peers"], backend, STATE,
+                operation_id=args.operation_id)
         except (TransactionBlocked, ValueError) as exc:
             raise HelperError("Route transaction refused: " + str(exc)) from exc
         print(json.dumps(result))

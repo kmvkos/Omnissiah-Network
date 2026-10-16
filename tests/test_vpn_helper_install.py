@@ -21,6 +21,7 @@ ROOT_MODULES = (
     "vpn_route_executor_sim.py",
     "vpn_reconcile.py",
     "vpn_route_tx.py",
+    "vpn_operation_fence.py",
 )
 
 

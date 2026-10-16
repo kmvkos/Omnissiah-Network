@@ -263,4 +263,7 @@ def reconcile_add_only(folder, backend, management_addresses):
             raise AddOnlyRecoveryBlocked("Rollback verification failed; manual review required")
         record.update(state="rolled_back", phase="done")
         _durable_write(folder, "mesh-transaction.json", record)
+        if record.get("operation_id") is not None:
+            from vpn_operation_fence import finish
+            finish(folder, record["operation_id"], "rolled_back")
         return {"state": "rolled_back", "changed": True}

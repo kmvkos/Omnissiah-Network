@@ -25,6 +25,7 @@ sys.path.insert(0, str(ROOT / "deploy"))
 from vpn_helper import render
 from vpn_linux_backend import IsolatedLinuxMeshBackend
 from vpn_mesh_transaction import MeshTransactionBlocked, run_offline_mesh_transaction
+from vpn_route_executor_sim import TransactionBlocked
 
 WG0_ADDRESS = "10.77.0.2/32"
 OLD_ROUTE = "10.77.0.3/32"
@@ -338,7 +339,7 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
         os.waitpid(pid, 0)
         self.fail("Worker timed out instead of hitting the injected kill point")
 
-    def _run_transaction_with_sigkill(self, boundary):
+    def _run_transaction_with_sigkill(self, boundary, *, operation_id=None):
         """Real coordinator + real commands; kill after a precise journaled step."""
         lockfile = self.state / "mesh-transaction.lock"
         lockfile.touch(mode=0o600)
@@ -363,7 +364,8 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
                         os.kill(os.getpid(), signal.SIGKILL)
                 self.backend.route_step = kill_route_step
             run_offline_mesh_transaction(
-                self.plan, self.desired["peers"], self.backend, self.state)
+                self.plan, self.desired["peers"], self.backend, self.state,
+                operation_id=operation_id)
 
         self._kill_forked_worker(work)
         return json.loads((self.state / "mesh-transaction.json").read_text())
@@ -403,6 +405,8 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
         """Actual process is killed after durable prepared journal, before WG sync."""
         import vpn_mesh_transaction
         from vpn_prepared_recovery import reconcile_prepared
+        from vpn_operation_fence import status
+        operation_id = str(uuid.uuid4())
         lock = self.state / "mesh-transaction.lock"
         lock.touch(mode=0o600)
         lock.chmod(0o600)
@@ -416,17 +420,36 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
                     os.kill(os.getpid(), signal.SIGKILL)
             vpn_mesh_transaction._journal = kill_after_prepared
             run_offline_mesh_transaction(
-                self.plan, self.desired["peers"], self.backend, self.state)
+                self.plan, self.desired["peers"], self.backend, self.state,
+                operation_id=operation_id)
 
         self._kill_forked_worker(work)
         saved = json.loads((self.state / "mesh-transaction.json").read_text())
         self.assertEqual((saved["state"], saved["phase"]), ("prepared", "none"))
         self.assertEqual(self._wg_keys(), {self.old_public})
         self.assertEqual(self._route_set(), {OLD_ROUTE})
+        self.assertEqual(status(self.state, operation_id)["state"], "reserved")
         self.assertEqual(reconcile_prepared(
             self.state, self.backend), {"state": "rolled_back", "changed": True})
+        self.assertEqual(status(self.state, operation_id)["state"], "rolled_back")
         self.assertEqual(self._wg_keys(), {self.old_public})
         self.assertEqual(self._route_set(), {OLD_ROUTE})
+        self.assertEqual(self.config.read_bytes(), self.before_config)
+
+    def test_sigkill_and_add_only_rollback_closes_operation_uuid(self):
+        """Recovery resolves durable admission only after original state verified."""
+        from vpn_add_only_recovery import reconcile_add_only
+        from vpn_operation_fence import status
+        operation_id = str(uuid.uuid4())
+        record = self._run_transaction_with_sigkill(
+            "after_route_write", operation_id=operation_id)
+        self.assertEqual(record["operation_id"], operation_id)
+        self.assertEqual(status(self.state, operation_id)["state"], "reserved")
+        self.assertEqual(reconcile_add_only(
+            self.state, self.backend, ["10.77.0.2"])["state"], "rolled_back")
+        self.assertEqual(status(self.state, operation_id)["state"], "rolled_back")
+        self.assertEqual(self._route_set(), {OLD_ROUTE})
+        self.assertEqual(self._wg_keys(), {self.old_public})
         self.assertEqual(self.config.read_bytes(), self.before_config)
 
     def test_sigkill_after_wg_sync_fails_closed_at_nonrecoverable_phase(self):
@@ -522,6 +545,77 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
             self.state, self.backend, ["10.77.0.2"])["state"], "rolled_back")
         self.assertEqual(self._wg_keys(), {self.old_public})
         self.assertEqual(self.config.read_bytes(), self.before_config)
+
+    def test_durable_uuid_blocks_reuse_for_a_new_topology_after_first_commit(self):
+        """At-most-once fence survives a successful real WireGuard update."""
+        from vpn_operation_fence import status
+        first_id, next_id = str(uuid.uuid4()), str(uuid.uuid4())
+        result = run_offline_mesh_transaction(
+            self.plan, self.desired["peers"], self.backend, self.state,
+            operation_id=first_id)
+        self.assertEqual(result["state"], "committed")
+        self.assertEqual(status(self.state, first_id)["state"], "committed")
+
+        _, another_key = keypair()
+        extended = copy.deepcopy(self.desired)
+        extended["peers"].append({
+            "public_key": another_key,
+            "endpoint": "192.0.2.5:51820",
+            "allowed_ips": ["10.77.0.5/32"],
+            "keepalive": 25,
+        })
+        from vpn_route_journal import prepare_transaction
+        peers, routes = self.backend.snapshot()
+        delta = prepare_transaction(extended["peers"], peers, routes)
+        next_backend = IsolatedLinuxMeshBackend(
+            extended, delta, state_dir=self.state,
+            config_path=self.config, runner=self._runner,
+            allow_mutations=True)
+        with self.assertRaisesRegex(TransactionBlocked, "already used"):
+            run_offline_mesh_transaction(
+                delta, extended["peers"], next_backend, self.state,
+                operation_id=first_id)
+        self.assertEqual(self._route_set(), {OLD_ROUTE, NEW_ROUTE})
+        self.assertEqual(self._wg_keys(), {self.old_public, self.new_public})
+
+        updated = run_offline_mesh_transaction(
+            delta, extended["peers"], next_backend, self.state,
+            operation_id=next_id)
+        self.assertEqual(updated["state"], "committed")
+        self.assertEqual(status(self.state, next_id)["state"], "committed")
+        self.assertEqual(self._route_set(), {OLD_ROUTE, NEW_ROUTE, "10.77.0.5/32"})
+        self.assertEqual(self._wg_keys(), {self.old_public, self.new_public, another_key})
+
+    def test_sigkill_after_operation_reservation_prevents_any_new_apply(self):
+        """Even before backup/journal, an unknown accepted request blocks a retry."""
+        from vpn_operation_fence import status
+        from vpn_transaction_health import inspect_transaction
+        op_id, next_id = str(uuid.uuid4()), str(uuid.uuid4())
+        lock = self.state / "mesh-transaction.lock"
+        lock.touch(mode=0o600)
+        lock.chmod(0o600)
+
+        def work():
+            real_backup = self.backend.stage_backup
+
+            def kill_after_backup():
+                real_backup()
+                os.kill(os.getpid(), signal.SIGKILL)
+            self.backend.stage_backup = kill_after_backup
+            run_offline_mesh_transaction(
+                self.plan, self.desired["peers"], self.backend, self.state,
+                operation_id=op_id)
+
+        self._kill_forked_worker(work)
+        self.assertEqual(status(self.state, op_id)["state"], "reserved")
+        self.assertEqual(inspect_transaction(self.state)["reason"], "orphan_operation")
+        self.assertEqual(self._route_set(), {OLD_ROUTE})
+        self.assertEqual(self._wg_keys(), {self.old_public})
+        with self.assertRaisesRegex(TransactionBlocked, "outcome unknown"):
+            run_offline_mesh_transaction(
+                self.plan, self.desired["peers"], self.backend, self.state,
+                operation_id=next_id)
+        self.assertEqual(status(self.state, next_id)["state"], "unknown")
 
     def test_sequential_real_peer_additions_preserve_existing_mesh(self):
         """Apply a third peer, then a fourth without disrupting previous routes."""
