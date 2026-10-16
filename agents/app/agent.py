@@ -90,12 +90,12 @@ def vpn_control_v2():
     if not isinstance(data, dict) or set(data) - {"action", "plan", "operation_id"}:
         return jsonify(error="Invalid VPN control payload"), 400
     action = data.get("action")
-    if action not in ("identity", "status", "prepare", "start", "apply", "route-preview", "route-transaction", "transaction-status", "cognitor-preview"):
+    if action not in ("identity", "status", "prepare", "start", "apply", "route-preview", "route-transaction", "transaction-status", "cognitor-preview", "cognitor-add"):
         return jsonify(error="Unsupported VPN operation"), 400
-    if action == "route-transaction" and not config.get("vpn_route_transactions_enabled", False):
+    if action in ("route-transaction", "cognitor-add") and not config.get("vpn_route_transactions_enabled", False):
         return jsonify(error="Route transactions are disabled on Magos"), 403
     operation_id = data.get("operation_id")
-    if action == "route-transaction":
+    if action in ("route-transaction", "cognitor-add"):
         import uuid
         try:
             parsed = uuid.UUID(operation_id)
@@ -107,7 +107,7 @@ def vpn_control_v2():
     elif operation_id is not None:
         return jsonify(error="Unexpected operation ID"), 400
     plan = data.get("plan")
-    if action in ("prepare", "apply", "route-preview", "route-transaction", "cognitor-preview"):
+    if action in ("prepare", "apply", "route-preview", "route-transaction", "cognitor-preview", "cognitor-add"):
         if not isinstance(plan, dict):
             return jsonify(error="A VPN plan is required"), 400
         if plan.get("node_name") != config.get("name") or plan.get("address") != config.get("ip_pool"):
