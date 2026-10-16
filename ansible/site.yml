@@ -155,15 +155,15 @@
           --pki {{ (omnissiah_state_dir ~ '/pki') | quote }} 2>&1
         )
         probe_rc=$?
-        printf '%s\\n' "$probe_output"
-        printf 'OMNISSIAH_PROBE_RC=%s\\n' "$probe_rc"
+        printf '%s\n' "$probe_output"
+        printf 'OMNISSIAH_PROBE_RC=%s\n' "$probe_rc"
         exit 0
       args:
         executable: /bin/sh
       delegate_to: "{{ groups.omnissiah[0] }}"
       register: agent_https_probe
       changed_when: false
-      failed_when: "'OMNISSIAH_PROBE_RC=0' not in agent_https_probe.stdout_lines
+      failed_when: "'OMNISSIAH_PROBE_RC=0' not in agent_https_probe.stdout_lines"
     - name: Report successful enrollment
       ansible.builtin.debug:
         msg: "{{ inventory_hostname }}: authenticated heartbeat and controller-to-agent HTTPS succeeded. VPN is not yet configured."
