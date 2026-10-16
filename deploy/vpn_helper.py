@@ -137,7 +137,7 @@ def verify_active_peers(data):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["identity", "validate", "prepare", "start", "apply", "status", "route-preview", "route-transaction"])
+    parser.add_argument("command", choices=["identity", "validate", "prepare", "start", "apply", "status", "route-preview", "route-transaction", "transaction-status"])
     parser.add_argument("--node-name", required=True)
     parser.add_argument("--plan", type=Path)
     args = parser.parse_args()
@@ -147,6 +147,10 @@ def main():
         parser.error("Must run as root")
     if args.command == "identity":
         print(json.dumps({"public_key": ensure_keys(STATE)}))
+        return
+    if args.command == "transaction-status":
+        from vpn_transaction_health import inspect_transaction
+        print(json.dumps(inspect_transaction(STATE)))
         return
     if args.command == "status":
         exists = subprocess.run(["ip", "link", "show", "dev", IFACE], capture_output=True).returncode == 0
