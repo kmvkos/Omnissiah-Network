@@ -25,6 +25,9 @@ def root_dir(tmp_path):
 
 
 def record(folder, state, *, backup=True):
+    lock = folder / "mesh-transaction.lock"
+    lock.touch(mode=0o600)
+    lock.chmod(0o600)
     digest = "a" * 64
     contents = {
         "schema_version": 1, "state": state,
@@ -130,3 +133,18 @@ def test_transaction_status_is_read_only_and_connected_through_mtls():
     assert 'url_for("vpn_mesh_transaction_status")' in html
     assert "vpn_transaction_health.py" in install
     assert "vpn_helper.py" not in module.__dict__.get("__doc__", "")
+
+
+def test_status_never_creates_lockfile(tmp_path):
+    folder = root_dir(tmp_path)
+    assert module.inspect_transaction(folder)["state"] == "idle"
+    assert not (folder / "mesh-transaction.lock").exists()
+
+
+def test_missing_lockfile_with_existing_journal_fails_closed(tmp_path):
+    folder = root_dir(tmp_path)
+    record(folder, "applying")
+    (folder / "mesh-transaction.lock").unlink()
+    result = module.inspect_transaction(folder)
+    assert result["state"] == "recovery_required"
+    assert result["reason"] == "missing_lock_file"
