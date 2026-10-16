@@ -74,6 +74,8 @@ load_dotenv(dotenv_path=env_path)
 app = Flask(__name__, template_folder='../templates')
 app.secret_key = os.getenv('SECRET_KEY') or secrets.token_hex(32)
 app.config['DEBUG'] = os.getenv('DEBUG', 'False').lower() == 'true'
+# Experimental route writes stay disabled unless explicitly enabled in the controller environment.
+app.config['VPN_ROUTE_TRANSACTIONS_ENABLED'] = os.getenv('VPN_ROUTE_TRANSACTIONS_ENABLED') == 'YES'
 
 scheduler = BackgroundScheduler(daemon=True)
 
@@ -3092,21 +3094,26 @@ def vpn_mesh_operation():
     from vpn_topology import project_magos_mesh
     from vpn_plan import VPNPlanError
     body = request.get_json(silent=True)
-    if not isinstance(body, dict) or set(body) != {"node_id", "action"}:
-        return jsonify(error="Expected node_id and action"), 400
+    if not isinstance(body, dict) or not {"node_id", "action"} <= set(body) or set(body) - {"node_id", "action", "expected_revision"}:
+        return jsonify(error="Invalid VPN operation payload"), 400
+    if body.get("action") == "route-transaction":
+        if not isinstance(body.get("expected_revision"), str) or len(body["expected_revision"]) != 64:
+            return jsonify(error="A preview revision is required"), 409
+    elif "expected_revision" in body:
+        return jsonify(error="Unexpected preview revision"), 400
     action = body["action"]
-    if action not in ("identity", "status", "prepare", "start", "apply"):
+    if action not in ("identity", "status", "prepare", "start", "apply", "route-transaction"):
         return jsonify(error="Unsupported operation"), 400
     if type(body["node_id"]) is not int:
         return jsonify(error="Invalid node ID"), 400
     node = db.session.get(General, body["node_id"])
     if not node or node.role != "Magos":
         return jsonify(error="Magos not found"), 404
-    if action in ("start", "apply") and request.headers.get("X-VPN-Explicit-Apply") != "ENABLE_TEST_MESH":
+    if action in ("start", "apply", "route-transaction") and request.headers.get("X-VPN-Explicit-Apply") != "ENABLE_TEST_MESH":
         return jsonify(error="Explicit lab activation acknowledgement required"), 409
     try:
         plan = None
-        if action in ("prepare", "apply"):
+        if action in ("prepare", "apply", "route-transaction"):
             projected = project_magos_mesh(General.query.filter_by(role="Magos").all(),
                                             NodeConnection.query.all())
             selected = next(p for p in projected if p["node_id"] == node.id)
@@ -3126,13 +3133,42 @@ def vpn_mesh_operation():
                                       active=observed_before.get("active") is True)
             if decision["decision"] != "eligible":
                 return jsonify(error="Apply refused by live preflight", preflight=decision), 409
+        if action == "route-transaction":
+            if not app.config.get("VPN_ROUTE_TRANSACTIONS_ENABLED", False):
+                return jsonify(error="Route transactions not enabled on controller"), 403
+            from vpn_tx_revision import plan_revision
+            if body["expected_revision"] != plan_revision(plan):
+                return jsonify(error="Desired topology changed since preview; repeat preview"), 409
+            from vpn_change_preview import preview as preview_change
+            live_before = _vpn_v2_send(node, "status")
+            verdict = preview_change(plan["peers"], live_before.get("peers"),
+                                     active=live_before.get("active") is True)
+            if verdict.get("reason") != "route_change_requires_transaction":
+                return jsonify(error="No route delta requiring transaction", preflight=verdict), 409
+            checked = _vpn_v2_send(node, "route-preview", plan)
+            delta = checked.get("route_delta")
+            if checked.get("writes_performed") is not False or checked.get("safe_to_plan") is not True or not isinstance(delta, dict) or not (delta.get("add") or delta.get("remove")):
+                return jsonify(error="Root helper did not validate a route delta"), 409
+            # Reproject just before the write. The root helper independently
+            # checks its kernel snapshot under an exclusive transaction lock.
+            reprojected = project_magos_mesh(
+                General.query.filter_by(role="Magos").all(), NodeConnection.query.all())
+            latest = next(p for p in reprojected if p["node_id"] == node.id)
+            fresh_plan = {"node_name": latest["node_name"],
+                          "address": latest["address"],
+                          "listen_port": latest["listen_port"],
+                          "peers": [{k: peer[k] for k in
+                                    ("public_key", "endpoint", "allowed_ips", "keepalive")}
+                                   for peer in latest["peers"]]}
+            if plan_revision(fresh_plan) != body["expected_revision"]:
+                return jsonify(error="Desired topology changed during preflight; repeat preview"), 409
         result = _vpn_v2_send(node, action, plan)
-        if action == "apply":
+        if action in ("apply", "route-transaction"):
             from vpn_reconcile import compare
             observed_after = _vpn_v2_send(node, "status")
             verification = compare(plan["peers"], observed_after.get("peers"))
             if verification["state"] != "in_sync":
-                app.logger.error("VPN apply verification mismatch for %s", node.name)
+                app.logger.error("VPN operation verification mismatch for %s", node.name)
                 return jsonify(error="Apply returned but postflight is not in sync; manual investigation required",
                                verification=verification["state"]), 502
         if action == "identity":
@@ -3197,6 +3233,10 @@ def vpn_mesh_change_preview():
                     routes = _vpn_v2_send(by_id[plan["node_id"]], "route-preview", strict_plan)
                     result["route_delta"] = routes.get("route_delta", {})
                     result["reason"] = "route_changes_validated_but_not_applied"
+                    from vpn_tx_revision import plan_revision
+                    result["preview_revision"] = plan_revision(strict_plan)
+                    result["transaction_available"] = bool(
+                        app.config.get("VPN_ROUTE_TRANSACTIONS_ENABLED", False))
                 except (ValueError, requests.RequestException, OSError, RuntimeError) as exc:
                     app.logger.warning("VPN route preflight rejected %s: %s",
                                        plan["node_name"], exc)

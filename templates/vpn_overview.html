@@ -56,10 +56,11 @@
       <button class="btn btn-outline-modern" id="vpnPreviewBtn" type="button" onclick="vpnPreviewChanges()">Показать изменения</button>
     </div>
     <div role="status" class="small text-muted mb-3" id="vpnPreviewMessage">Сначала выполните предпросмотр.</div>
+    <p class="text-muted small">Транзакции изменения маршрутов экспериментальные и по умолчанию отключены. После разрешения они выполняются отдельно для каждого Magos с подтверждением и повторной проверкой состояния.</p>
     <div class="table-responsive">
       <table class="table table-dark premium-table">
-        <thead><tr><th>Magos</th><th>Добавить</th><th>Удалить</th><th>Изменить</th><th>Возможность применения</th></tr></thead>
-        <tbody id="vpnPreviewRows"><tr><td colspan="5" class="text-center text-muted">Проверка ещё не запускалась</td></tr></tbody>
+        <thead><tr><th>Magos</th><th>Добавить</th><th>Удалить</th><th>Изменить</th><th>Возможность применения</th><th>Действие</th></tr></thead>
+        <tbody id="vpnPreviewRows"><tr><td colspan="6" class="text-center text-muted">Проверка ещё не запускалась</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -83,6 +84,45 @@
 {% endblock %}
 {% block scripts %}
 <script>
+async function applyVpnRouteTransaction(nodeId, nodeName, previewRevision, button) {
+  if (!confirm('Изменить работающий WireGuard и маршруты узла ' + nodeName +
+      '? Сначала убедитесь, что сохранены снапшоты и доступ к управлению.')) return;
+  if (prompt('Для подтверждения введите имя узла: ' + nodeName) !== nodeName) return;
+  const info = document.getElementById('vpnPreviewMessage');
+  button.disabled = true;
+  info.textContent = 'Применяю транзакцию на ' + nodeName + '. Не повторяйте запрос.';
+  try {
+    const response = await fetch('/api/v2/vpn/mesh/operation', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-VPN-Explicit-Apply': 'ENABLE_TEST_MESH'
+      },
+      body: JSON.stringify({
+        node_id: nodeId, action: 'route-transaction',
+        expected_revision: previewRevision
+      })
+    });
+    if (!(response.headers.get('content-type') || '').includes('application/json')) {
+      throw new Error('Сервер вернул HTTP ' + response.status + ' вместо JSON');
+    }
+    const payload = await response.json();
+    if (!response.ok || !payload.success) {
+      throw new Error(payload.error || 'HTTP ' + response.status);
+    }
+    info.textContent = 'Транзакция ' + nodeName +
+      ' завершена; сервер проверил peers. Повторите сверку VPN и проверьте handshake.';
+  } catch (error) {
+    info.textContent = 'Ошибка транзакции ' + nodeName + ': ' + error.message +
+      '. Не повторяйте применение до проверки журнала и состояния узла.';
+  }
+  // The previous preview must never remain a reusable authorization.
+  document.getElementById('vpnPreviewRows').replaceChildren();
+  const btn = document.getElementById('vpnPreviewBtn');
+  btn.disabled = false;
+}
+
 async function vpnPreviewChanges() {
   const button = document.getElementById('vpnPreviewBtn');
   const message = document.getElementById('vpnPreviewMessage');
@@ -112,9 +152,25 @@ async function vpnPreviewChanges() {
         td.textContent = String(value);
         row.appendChild(td);
       }
+      const actionCell = document.createElement('td');
+      if (item.reason === 'route_changes_validated_but_not_applied' &&
+          item.transaction_available === true &&
+          typeof item.preview_revision === 'string' && item.preview_revision.length === 64) {
+        const run = document.createElement('button');
+        run.type = 'button';
+        run.className = 'btn btn-sm btn-outline-warning';
+        run.textContent = 'Применить маршруты';
+        run.addEventListener('click', () => applyVpnRouteTransaction(
+          item.node_id, item.node_name, item.preview_revision, run));
+        actionCell.appendChild(run);
+      } else {
+        actionCell.textContent = item.reason === 'route_changes_validated_but_not_applied'
+          ? 'Отключено администратором' : '—';
+      }
+      row.appendChild(actionCell);
       target.appendChild(row);
     }
-    message.textContent = 'Предпросмотр выполнен. Применение изменений не выполнялось.';
+    message.textContent = 'Предпросмотр выполнен. Никаких изменений не применено.';
   } catch (error) {
     message.textContent = 'Ошибка предпросмотра: ' + error.message;
   } finally {

@@ -90,10 +90,12 @@ def vpn_control_v2():
     if not isinstance(data, dict) or set(data) - {"action", "plan"}:
         return jsonify(error="Invalid VPN control payload"), 400
     action = data.get("action")
-    if action not in ("identity", "status", "prepare", "start", "apply", "route-preview"):
+    if action not in ("identity", "status", "prepare", "start", "apply", "route-preview", "route-transaction"):
         return jsonify(error="Unsupported VPN operation"), 400
+    if action == "route-transaction" and not config.get("vpn_route_transactions_enabled", False):
+        return jsonify(error="Route transactions are disabled on Magos"), 403
     plan = data.get("plan")
-    if action in ("prepare", "apply", "route-preview"):
+    if action in ("prepare", "apply", "route-preview", "route-transaction"):
         if not isinstance(plan, dict):
             return jsonify(error="A VPN plan is required"), 400
         if plan.get("node_name") != config.get("name") or plan.get("address") != config.get("ip_pool"):

@@ -11,6 +11,7 @@ on:
       - 'deploy/vpn_reconcile.py'
       - 'deploy/vpn_helper.py'
       - 'tests/integration/test_vpn_netns_live.py'
+      - 'tests/test_vpn_linux_backend.py'
       - '.github/workflows/vpn-netns.yml'
   workflow_dispatch:
 
@@ -23,7 +24,7 @@ jobs:
       - name: Install WireGuard and network namespace dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y iproute2 wireguard-tools
+          sudo apt-get install -y iproute2 wireguard-tools python3-pytest
       - name: Require working Linux WireGuard kernel support
         run: |
           set -eu
@@ -35,3 +36,6 @@ jobs:
       - name: Run live tests ONLY inside per-test network namespaces
         run: |
           sudo python3 -m unittest discover -s tests/integration -p test_vpn_netns_live.py -v
+      - name: Run offline backend unit regression tests
+        run: |
+          python3 -m pytest -q tests/test_vpn_linux_backend.py

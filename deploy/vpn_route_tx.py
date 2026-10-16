@@ -99,3 +99,37 @@ def plan_route_delta(desired_peers, actual_wg_peers, main_routes, *, iface="wg0"
         "remove": sorted(previous - desired),
         "unchanged": sorted(desired & previous),
     }
+
+
+def reject_protected_host_routes(desired_peers, actual_peers, protected_addresses):
+    """Fail closed if any peer route can capture management or WG underlay.
+
+    Call with trusted control-plane addresses, never values from the VPN plan.
+    Reject current and desired peers so even drifted existing routes require
+    manual recovery rather than quietly authorizing an unsafe transaction.
+    """
+    protected = set()
+    for value in protected_addresses:
+        try:
+            address = ip_address(value)
+        except (TypeError, ValueError) as exc:
+            raise RouteConflict("Invalid protected management address") from exc
+        if address.version != 4 or address.is_unspecified or address.is_multicast:
+            raise RouteConflict("Protected management address must be IPv4 unicast")
+        protected.add(address)
+    if not protected:
+        raise RouteConflict("Protected management addresses are not configured")
+    all_peers = list(desired_peers) + list(actual_peers)
+    for peer in all_peers:
+        endpoint = peer.get("endpoint")
+        if endpoint and isinstance(endpoint, str):
+            try:
+                protected.add(ip_address(endpoint.rsplit(":", 1)[0]))
+            except ValueError as exc:
+                raise RouteConflict("Invalid protected WireGuard endpoint") from exc
+    for peer in all_peers:
+        for target in peer["allowed_ips"]:
+            net = ip_network(target, strict=True)
+            if any(ip in net for ip in protected):
+                raise RouteConflict("VPN peer route intersects management or endpoint address")
+    return True

@@ -74,6 +74,7 @@
       - "{{ omnissiah_state_dir }}/inventory-manifest.json"
   environment:
     OMNISSIAH_INITIAL_ADMIN_PASSWORD: "{{ omnissiah_initial_admin_password | default('') }}"
+    OMNISSIAH_BOOTSTRAP_ROUTE_TRANSACTIONS: "{{ 'true' if (omnissiah_vpn_route_transactions_controller_enabled | default(false) | bool) else 'false' }}"
   register: enrollment
   changed_when: (enrollment.stdout | from_json).changed
   no_log: true

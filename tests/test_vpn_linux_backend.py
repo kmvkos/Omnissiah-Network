@@ -131,7 +131,90 @@ def test_verify_rejects_stale_peer_state(tmp_path, monkeypatch):
         backend.verify(BASE["peers"] + [ADDED], plan)
 
 
-def test_no_runtime_api_integration():
-    for name in ("vpn_rpc.py", "vpn_helper.py"):
-        content = (ROOT / "deploy" / name).read_text()
-        assert "vpn_linux_backend" not in content
+def test_route_transactions_require_explicit_multilayer_opt_in():
+    helper = (ROOT / "deploy" / "vpn_helper.py").read_text()
+    agent = (ROOT / "agents/app/agent.py").read_text()
+    controller = (ROOT / "src/app.py").read_text()
+    assert 'OMNISSIAH_ENABLE_ROUTE_TRANSACTIONS' in helper
+    assert 'vpn_route_transactions_enabled' in agent
+    assert 'VPN_ROUTE_TRANSACTIONS_ENABLED' in controller
+    assert 'route-transaction' in helper
+
+
+def test_completed_transaction_backup_is_archived_before_next_stage(tmp_path, monkeypatch):
+    backend, _, state, plan = make_backend(tmp_path)
+    monkeypatch.setattr(backend, "_require_enabled", lambda: None)
+    monkeypatch.setattr(backend, "_config_bytes",
+                        lambda: b"# Managed by Omnissiah VPN v2\\nold-config")
+    monkeypatch.setattr(backend, "_command",
+                        lambda argv, **kwargs: "OLD-LIVE-CONFIG\\n")
+    monkeypatch.setattr(backend, "snapshot",
+                        lambda: (list(BASE["peers"]), list(ROUTES)))
+    backend.stage_backup()
+    first = (state / "mesh-backup.json").read_bytes()
+    from vpn_route_executor_sim import _durable_write
+    _durable_write(state, "mesh-transaction.json",
+                   {"schema_version": 1, "state": "committed",
+                    "snapshot_sha256": plan["snapshot_sha256"]})
+    backend.stage_backup()
+    archived = list(state.glob("mesh-backup-*.json"))
+    assert len(archived) == 1
+    assert archived[0].read_bytes() == first
+    assert archived[0].stat().st_mode & 0o077 == 0
+    assert (state / "mesh-backup.json").is_file()
+
+
+def test_unresolved_previous_backup_still_fails_closed(tmp_path, monkeypatch):
+    backend, _, state, plan = make_backend(tmp_path)
+    monkeypatch.setattr(backend, "_require_enabled", lambda: None)
+    monkeypatch.setattr(backend, "_config_bytes",
+                        lambda: b"# Managed by Omnissiah VPN v2\\nold-config")
+    monkeypatch.setattr(backend, "_command", lambda argv, **kwargs: "OLD\\n")
+    monkeypatch.setattr(backend, "snapshot",
+                        lambda: (list(BASE["peers"]), list(ROUTES)))
+    backend.stage_backup()
+    from vpn_route_executor_sim import _durable_write
+    _durable_write(state, "mesh-transaction.json",
+                   {"schema_version": 1, "state": "applying",
+                    "snapshot_sha256": plan["snapshot_sha256"]})
+    with pytest.raises(TransactionBlocked, match="Unresolved backup"):
+        backend.stage_backup()
+    assert not list(state.glob("mesh-backup-*.json"))
+
+
+def test_protected_management_path_checked_before_and_after_mutation(tmp_path, monkeypatch):
+    backend, _, _, _ = make_backend(tmp_path)
+    backend._protected_addresses = ("192.168.32.167", "192.168.32.169")
+    monkeypatch.setattr(backend, "_require_enabled", lambda: None)
+    monkeypatch.setattr(backend, "_config_bytes",
+                        lambda: b"# Managed by Omnissiah VPN v2\\nold")
+    monkeypatch.setattr(backend, "snapshot",
+                        lambda: (list(BASE["peers"]), list(ROUTES)))
+    state = {"device": "eth0"}
+
+    def command(argv, **kwargs):
+        if argv[:5] == ["ip", "-j", "-4", "route", "get"]:
+            return json.dumps([{"dev": state["device"], "gateway": None,
+                                "prefsrc": "192.168.32.168", "table": "main"}])
+        return "OLD-WG-CONF\\n"
+
+    monkeypatch.setattr(backend, "_command", command)
+    backend.stage_backup()
+    backend._verify_protected_routes()
+    state["device"] = "wg0"
+    with pytest.raises(TransactionBlocked, match="traverses wg0"):
+        backend._verify_protected_routes()
+    state["device"] = "eth1"
+    with pytest.raises(TransactionBlocked, match="routing changed"):
+        backend._verify_protected_routes()
+
+
+def test_protected_management_path_fails_closed_if_unreachable(tmp_path, monkeypatch):
+    backend, _, _, _ = make_backend(tmp_path)
+    backend._protected_addresses = ("192.168.32.167",)
+    monkeypatch.setattr(backend, "_require_enabled", lambda: None)
+    monkeypatch.setattr(backend, "_command",
+                        lambda argv, **kwargs: "[]")
+    with pytest.raises(TransactionBlocked, match="observation incomplete"):
+        backend.stage_backup()
+    assert not (backend._state / "mesh-backup.json").exists()
