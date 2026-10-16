@@ -24,6 +24,12 @@ def ensure_environment(project, state):
     values.setdefault('SECRET_KEY', secrets.token_hex(32))
     values.update(OMNISSIAH_DATABASE_URI=f'sqlite:///{state / "data" / "vpngate.db"}',
                   OMNISSIAH_REQUIRE_MTLS='true', DEBUG='false')
+    # Installation-owned feature gate: disabled unless explicitly allowed
+    # by the trusted Ansible controller inventory. Never take this from HTTP.
+    route_tx = os.environ.get('OMNISSIAH_BOOTSTRAP_ROUTE_TRANSACTIONS', 'false')
+    if route_tx not in ('true', 'false'):
+        raise ValueError('Invalid route transaction installation setting')
+    values['VPN_ROUTE_TRANSACTIONS_ENABLED'] = 'YES' if route_tx == 'true' else 'NO'
     if not values.get('WG_MASTER_KEY') or not values.get('SECRET_KEY'):
         raise ValueError('Existing environment contains empty secrets; explicit repair required')
     Fernet(values['WG_MASTER_KEY'].encode())
