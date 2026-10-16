@@ -1,5 +1,6 @@
 """Conservative recovery tests: no WireGuard writes and no secret disclosures."""
 import fcntl
+import importlib.util
 import hashlib
 import importlib.util
 import json
@@ -161,3 +162,47 @@ def test_invalid_backup_generation_is_refused(tmp_path):
     p.write_text(json.dumps(state))
     with pytest.raises(mod.PreparedRecoveryBlocked, match="Invalid transaction backup"):
         mod.reconcile_prepared(folder, Backend())
+
+
+def test_boot_unit_is_installed_disabled_and_never_starts_wireguard():
+    tasks = (ROOT / "ansible/roles/services/tasks/main.yml").read_text()
+    unit = (ROOT / "ansible/roles/services/templates/vpn-prepared-recovery.service.j2").read_text()
+    cli = (ROOT / "deploy/vpn_prepared_recover_cli.py").read_text()
+    assert "vpn_prepared_recovery.py" in tasks
+    assert "omnissiah-vpn-prepared-recover" in tasks
+    assert "omnissiah-vpn-prepared-recovery.service" in tasks
+    assert "omnissiah_vpn_prepared_recovery_boot_enabled | default(false)" in tasks
+    assert "ExecStart=/usr/bin/python3 /usr/local/libexec/omnissiah-vpn-prepared-recover" in unit
+    assert "After=local-fs.target wg-quick@wg0.service" in unit
+    assert "Wants=wg-quick@wg0.service" not in unit
+    assert "Requires=wg-quick@wg0.service" not in unit
+    assert "wg-quick up" not in cli and "ip route add" not in cli
+
+
+def test_root_cli_blocks_applying_journal_without_mutating(tmp_path, monkeypatch):
+    source = ROOT / "deploy/vpn_prepared_recover_cli.py"
+    module_spec = importlib.util.spec_from_file_location("vpn_prepared_recover_cli", source)
+    module = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(module)
+    folder = setup_journal(tmp_path, state="applying", phase="route")
+    monkeypatch.setattr(module, "STATE", folder)
+    monkeypatch.setattr(module.os, "geteuid", lambda: 0)
+    before = (folder / "mesh-transaction.json").read_bytes()
+    with pytest.raises(mod.PreparedRecoveryBlocked, match="operator review"):
+        module.run()
+    assert (folder / "mesh-transaction.json").read_bytes() == before
+
+
+def test_root_cli_skips_clean_or_missing_journal_without_writes(tmp_path, monkeypatch):
+    source = ROOT / "deploy/vpn_prepared_recover_cli.py"
+    module_spec = importlib.util.spec_from_file_location("vpn_prepared_recover_cli_clean", source)
+    module = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(module)
+    folder = tmp_path / "vpn"
+    monkeypatch.setattr(module, "STATE", folder)
+    monkeypatch.setattr(module.os, "geteuid", lambda: 0)
+    assert module.run() == {"state": "not_initialized", "changed": False}
+    assert not folder.exists()
+    folder.mkdir()
+    assert module.run() == {"state": "idle", "changed": False}
+    assert list(folder.iterdir()) == []
