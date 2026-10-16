@@ -60,7 +60,7 @@ def inspect_transaction(directory):
                 "needs_attention": False, "backup_verified": False, "reason": None}
     try:
         fd = os.open(lock_path, os.O_RDONLY | os.O_NOFOLLOW)
-        with os.fdopen(fd, "a+") as lock:
+        with os.fdopen(fd, "r") as lock:
             meta = os.fstat(lock.fileno())
             if not stat.S_ISREG(meta.st_mode) or meta.st_uid != os.geteuid() or meta.st_mode & 0o077:
                 return _bad("unsafe_lock_file")
