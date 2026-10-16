@@ -119,13 +119,15 @@ def reject_protected_host_routes(desired_peers, actual_peers, protected_addresse
         protected.add(address)
     if not protected:
         raise RouteConflict("Protected management addresses are not configured")
-    for peer in list(desired_peers) + list(actual_peers):
+    all_peers = list(desired_peers) + list(actual_peers)
+    for peer in all_peers:
         endpoint = peer.get("endpoint")
         if endpoint and isinstance(endpoint, str):
             try:
                 protected.add(ip_address(endpoint.rsplit(":", 1)[0]))
             except ValueError as exc:
                 raise RouteConflict("Invalid protected WireGuard endpoint") from exc
+    for peer in all_peers:
         for target in peer["allowed_ips"]:
             net = ip_network(target, strict=True)
             if any(ip in net for ip in protected):
