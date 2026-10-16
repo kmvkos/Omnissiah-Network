@@ -87,7 +87,12 @@ wg pubkey &lt; cognitor-private.key</code></pre>
             <td><code>{{ draft.vpn_address }}</code></td>
             <td>{{ draft.parent_magos.name if draft.parent_magos else 'Неизвестен' }}</td>
             <td><span class="badge bg-secondary">{{ 'Черновик' if draft.status == 'draft' else 'Требует проверки' }}</span></td>
-            <td><span class="text-muted small">Применение пока недоступно</span></td>
+            <td>
+              <a class="btn btn-sm btn-outline-modern" href="{{ url_for('cognitors.vpn_cognitor_preview', draft_id=draft.id) }}">
+                Проверить подключение
+              </a>
+              <span class="text-muted small ms-2">Применение пока недоступно</span>
+            </td>
           </tr>
           {% else %}
           <tr><td colspan="5" class="text-muted text-center">Cognitor ещё не зарегистрированы</td></tr>
