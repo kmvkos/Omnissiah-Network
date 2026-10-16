@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import sys
+from uuid import uuid4
 
 import pytest
 
@@ -52,6 +53,37 @@ def test_explicit_start_rejects_supplied_plan(monkeypatch):
     monkeypatch.setenv("OMNISSIAH_NODE_NAME", "magos01")
     with pytest.raises(ValueError):
         mod.process({"action":"start", "node_name":"magos01", "plan":{"shell":"any"}})
+
+
+def test_route_transaction_passes_only_canonical_uuid_to_root_helper(monkeypatch, tmp_path):
+    monkeypatch.setenv("OMNISSIAH_NODE_NAME", "magos01")
+    monkeypatch.setattr(mod, "STATE", tmp_path / "vpn")
+    sys.path.insert(0, str(SOURCE.parent))
+    operation_id = str(uuid4())
+    captured = {}
+
+    class Done:
+        returncode = 0
+        stdout = '{"state":"committed","route_ops":1}'
+        stderr = ""
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        return Done()
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+    message = {"action": "route-transaction", "node_name": "magos01",
+               "operation_id": operation_id, "plan": {
+                   "node_name": "magos01", "address": "10.77.0.2/32",
+                   "listen_port": 51820, "peers": []}}
+    assert mod.process(message)["state"] == "committed"
+    assert captured["argv"].count("--operation-id") == 1
+    assert captured["argv"][captured["argv"].index("--operation-id") + 1] == operation_id
+    for invalid in (None, "not-a-uuid", "00000000-0000-0000-0000-000000000000"):
+        with pytest.raises(ValueError):
+            mod.process(dict(message, operation_id=invalid))
+    with pytest.raises(ValueError):
+        mod.process(dict(message, shell="true"))
 
 
 def test_route_transaction_requires_plan_and_fixed_node_identity(monkeypatch, tmp_path):
