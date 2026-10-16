@@ -131,10 +131,14 @@ def test_verify_rejects_stale_peer_state(tmp_path, monkeypatch):
         backend.verify(BASE["peers"] + [ADDED], plan)
 
 
-def test_no_runtime_api_integration():
-    for name in ("vpn_rpc.py", "vpn_helper.py"):
-        content = (ROOT / "deploy" / name).read_text()
-        assert "vpn_linux_backend" not in content
+def test_route_transactions_require_explicit_multilayer_opt_in():
+    helper = (ROOT / "deploy" / "vpn_helper.py").read_text()
+    agent = (ROOT / "agents/app/agent.py").read_text()
+    controller = (ROOT / "src/app.py").read_text()
+    assert 'OMNISSIAH_ENABLE_ROUTE_TRANSACTIONS' in helper
+    assert 'vpn_route_transactions_enabled' in agent
+    assert 'VPN_ROUTE_TRANSACTIONS_ENABLED' in controller
+    assert 'route-transaction' in helper
 
 
 def test_completed_transaction_backup_is_archived_before_next_stage(tmp_path, monkeypatch):
