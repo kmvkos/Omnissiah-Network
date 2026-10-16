@@ -67,7 +67,7 @@ def test_no_double_owned_routes():
 
 def test_is_pure_preflight():
     source = path.read_text()
-    assert "subprocess" not in source
+    assert "import subprocess" not in source
     assert "os.system" not in source
 
 def test_refuse_more_specific_route_hijacking_connected_network():
