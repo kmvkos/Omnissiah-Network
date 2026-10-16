@@ -274,6 +274,45 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
             reconcile_add_only(self.state, self.backend, ["10.77.0.2"])
         self.assertEqual(self._wg_keys(), {self.old_public, self.new_public})
 
+    def test_partial_add_recovery_resume_after_terminated_route_cleanup(self):
+        """A second invocation finishes when route was deleted before crash."""
+        from vpn_route_executor_sim import _durable_write
+        from vpn_add_only_recovery import reconcile_add_only
+        self._crash_route_stage(route_present=True)
+        self._runner(["ip", "-4", "route", "delete",
+                      NEW_ROUTE, "dev", "wg0", "table", "main"],
+                     capture_output=True, text=True, timeout=20, check=True)
+        record = json.loads((self.state / "mesh-transaction.json").read_text())
+        record.update(state="rolling_back", phase="add_only_recovery")
+        _durable_write(self.state, "mesh-transaction.json", record)
+        self.assertEqual(reconcile_add_only(
+            self.state, self.backend, ["10.77.0.2"])["state"], "rolled_back")
+        self.assertEqual(self._route_set(), {OLD_ROUTE})
+        self.assertEqual(self._wg_keys(), {self.old_public})
+
+    def test_partial_add_recovery_rejects_modified_original_peer(self):
+        """Never overwrite or remove a peer that existed before the failure."""
+        from vpn_add_only_recovery import reconcile_add_only, AddOnlyRecoveryBlocked
+        self._crash_route_stage(route_present=True)
+        command("ip", "netns", "exec", self.netns, "wg", "set", "wg0",
+                "peer", self.old_public, "persistent-keepalive", "0")
+        with self.assertRaises(AddOnlyRecoveryBlocked):
+            reconcile_add_only(self.state, self.backend, ["10.77.0.2"])
+        self.assertEqual(self._route_set(), {OLD_ROUTE, NEW_ROUTE})
+        self.assertEqual(self._wg_keys(), {self.old_public, self.new_public})
+
+    def test_partial_add_recovery_rejects_legacy_journal_without_descriptor(self):
+        """Previously committed journal format is deliberately not recoverable."""
+        from vpn_add_only_recovery import reconcile_add_only, AddOnlyRecoveryBlocked
+        self._crash_route_stage(route_present=True)
+        from vpn_route_executor_sim import _durable_write
+        record = json.loads((self.state / "mesh-transaction.json").read_text())
+        record.pop("recovery")
+        _durable_write(self.state, "mesh-transaction.json", record)
+        with self.assertRaisesRegex(AddOnlyRecoveryBlocked, "descriptor"):
+            reconcile_add_only(self.state, self.backend, ["10.77.0.2"])
+        self.assertEqual(self._route_set(), {OLD_ROUTE, NEW_ROUTE})
+
     def test_sequential_real_peer_additions_preserve_existing_mesh(self):
         """Apply a third peer, then a fourth without disrupting previous routes."""
         first = run_offline_mesh_transaction(
