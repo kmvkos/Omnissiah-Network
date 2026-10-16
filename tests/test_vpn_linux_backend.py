@@ -180,3 +180,41 @@ def test_unresolved_previous_backup_still_fails_closed(tmp_path, monkeypatch):
     with pytest.raises(TransactionBlocked, match="Unresolved backup"):
         backend.stage_backup()
     assert not list(state.glob("mesh-backup-*.json"))
+
+
+def test_protected_management_path_checked_before_and_after_mutation(tmp_path, monkeypatch):
+    backend, _, _, _ = make_backend(tmp_path)
+    backend._protected_addresses = ("192.168.32.167", "192.168.32.169")
+    monkeypatch.setattr(backend, "_require_enabled", lambda: None)
+    monkeypatch.setattr(backend, "_config_bytes",
+                        lambda: b"# Managed by Omnissiah VPN v2\\nold")
+    monkeypatch.setattr(backend, "snapshot",
+                        lambda: (list(BASE["peers"]), list(ROUTES)))
+    state = {"device": "eth0"}
+
+    def command(argv, **kwargs):
+        if argv[:5] == ["ip", "-j", "-4", "route", "get"]:
+            return json.dumps([{"dev": state["device"], "gateway": None,
+                                "prefsrc": "192.168.32.168", "table": "main"}])
+        return "OLD-WG-CONF\\n"
+
+    monkeypatch.setattr(backend, "_command", command)
+    backend.stage_backup()
+    backend._verify_protected_routes()
+    state["device"] = "wg0"
+    with pytest.raises(TransactionBlocked, match="traverses wg0"):
+        backend._verify_protected_routes()
+    state["device"] = "eth1"
+    with pytest.raises(TransactionBlocked, match="routing changed"):
+        backend._verify_protected_routes()
+
+
+def test_protected_management_path_fails_closed_if_unreachable(tmp_path, monkeypatch):
+    backend, _, _, _ = make_backend(tmp_path)
+    backend._protected_addresses = ("192.168.32.167",)
+    monkeypatch.setattr(backend, "_require_enabled", lambda: None)
+    monkeypatch.setattr(backend, "_command",
+                        lambda argv, **kwargs: "[]")
+    with pytest.raises(TransactionBlocked, match="observation incomplete"):
+        backend.stage_backup()
+    assert not (backend._state / "mesh-backup.json").exists()
