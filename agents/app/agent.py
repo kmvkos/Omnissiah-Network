@@ -87,13 +87,25 @@ def vpn_control_v2():
     if proxy_identity() != config.get("controller_name"):
         return jsonify(error="Verified controller identity required"), 403
     data = request.get_json(silent=True)
-    if not isinstance(data, dict) or set(data) - {"action", "plan"}:
+    if not isinstance(data, dict) or set(data) - {"action", "plan", "operation_id"}:
         return jsonify(error="Invalid VPN control payload"), 400
     action = data.get("action")
     if action not in ("identity", "status", "prepare", "start", "apply", "route-preview", "route-transaction", "transaction-status"):
         return jsonify(error="Unsupported VPN operation"), 400
     if action == "route-transaction" and not config.get("vpn_route_transactions_enabled", False):
         return jsonify(error="Route transactions are disabled on Magos"), 403
+    operation_id = data.get("operation_id")
+    if action == "route-transaction":
+        import uuid
+        try:
+            parsed = uuid.UUID(operation_id)
+            if (not isinstance(operation_id, str) or len(operation_id) != 36
+                    or parsed.version != 4 or str(parsed) != operation_id):
+                raise ValueError("Noncanonical operation ID")
+        except (ValueError, TypeError, AttributeError):
+            return jsonify(error="Canonical operation UUIDv4 required"), 400
+    elif operation_id is not None:
+        return jsonify(error="Unexpected operation ID"), 400
     plan = data.get("plan")
     if action in ("prepare", "apply", "route-preview", "route-transaction"):
         if not isinstance(plan, dict):
@@ -105,7 +117,7 @@ def vpn_control_v2():
         return jsonify(error="Unexpected plan"), 400
     try:
         from app.vpn_client import request_helper
-        result = request_helper(action, node_name=config.get("name"), plan=plan)
+        result = request_helper(action, node_name=config.get("name"), plan=plan, operation_id=operation_id)
         return jsonify(success=True, result=result), 200
     except (ValueError, RuntimeError, OSError, TimeoutError) as exc:
         current_app.logger.error("VPN v2 local helper rejected %s: %s", action, exc)
