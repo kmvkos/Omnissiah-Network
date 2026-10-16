@@ -3196,6 +3196,65 @@ def reconcile_vpn_mesh():
     return jsonify(results=records, applied=False, queried_at=datetime.now(timezone.utc).isoformat())
 
 
+def _vpn_safe_plan_for_node(node):
+    from vpn_topology import project_magos_mesh
+    plans = project_magos_mesh(
+        General.query.filter_by(role="Magos").all(), NodeConnection.query.all())
+    selected = next(p for p in plans if p["node_id"] == node.id)
+    return {
+        "node_name": selected["node_name"], "address": selected["address"],
+        "listen_port": selected["listen_port"],
+        "peers": [
+            {key: peer[key] for key in ("public_key", "endpoint", "allowed_ips", "keepalive")}
+            for peer in selected["peers"]
+        ],
+    }
+
+
+@app.route('/api/v2/vpn/mesh/safe-apply', methods=['POST'])
+@login_required
+@admin_required
+@require_omnissiah
+def safe_apply_vpn_node():
+    """Single-node preflight, apply, verify; no route-set or peer-key changes."""
+    from vpn_apply_safety import preview
+    from vpn_reconcile import compare
+    from vpn_plan import VPNPlanError
+    body = request.get_json(silent=True)
+    if (not isinstance(body, dict) or set(body) != {"node_id", "ack"} or
+            type(body["node_id"]) is not int or body["ack"] != "APPLY_SAFE_PEER_UPDATE"):
+        return jsonify(error="Explicit safe-apply acknowledgement required"), 400
+    node = db.session.get(General, body["node_id"])
+    if node is None or node.role != "Magos":
+        return jsonify(error="Unknown Magos"), 404
+    try:
+        desired = _vpn_safe_plan_for_node(node)
+        previous = _vpn_v2_send(node, "status")
+        condition = preview(desired["peers"], previous.get("peers"),
+                            active=previous.get("active") is True)
+        if not condition["allowed"]:
+            return jsonify(error="Unsafe live change rejected", preflight=condition), 409
+        if not condition["changed"]:
+            return jsonify(result="already_in_sync", preflight=condition), 200
+        # The Magos root helper itself re-checks routes before wg syncconf and
+        # restores the previous kernel peer set on a failed application.
+        _vpn_v2_send(node, "apply", desired)
+        current = _vpn_v2_send(node, "status")
+        verification = compare(desired["peers"], current.get("peers"))
+        if verification["state"] != "in_sync":
+            app.logger.error("VPN verify failed for %s; manual recovery needed", node.name)
+            return jsonify(error="Post-apply verification failed; manual recovery required",
+                           verification=verification), 503
+        app.logger.warning("Administrator %s applied safe VPN peer update to %s",
+                           current_user.get_id(), node.name)
+        return jsonify(result="applied_and_verified", verification=verification), 200
+    except (VPNPlanError, ValueError, StopIteration) as exc:
+        return jsonify(error=str(exc)), 409
+    except (requests.RequestException, OSError, RuntimeError, KeyError) as exc:
+        app.logger.exception("Safe VPN apply failed for %s", node.name)
+        return jsonify(error="Safe apply failed; inspect controller and Magos journals"), 502
+
+
 @app.route('/api/v2/vpn/mesh/preview', methods=['GET'])
 @login_required
 @admin_required
