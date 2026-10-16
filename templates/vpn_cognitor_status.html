@@ -1,0 +1,34 @@
+{% extends 'layout.html' %}
+{% block title %}Состояние Cognitor — {{ draft.name }}{% endblock %}
+{% block content %}
+<div class="container-fluid">
+  <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <div><h2>Состояние Cognitor: {{ draft.name }}</h2>
+      <p class="text-muted mb-0">Данные получены с {{ magos.name }} через защищённое управление mTLS. Эта страница ничего не изменяет.</p>
+    </div>
+    <a class="btn btn-outline-modern" href="{{ url_for('cognitors.vpn_cognitors') }}">← VPN-клиенты</a>
+  </div>
+  <div class="premium-card p-4">
+    {% if failure %}
+    <h5 class="text-warning">Нет достоверных данных</h5>
+    <p>{{ failure }}</p>
+    {% elif seen %}
+    <h5>
+      {% if seen.connected %}Недавнее рукопожатие WireGuard
+      {% elif seen.installed %}Пир установлен, свежего рукопожатия нет
+      {% else %}Пир отсутствует на Magos{% endif %}
+    </h5>
+    <dl class="row">
+      <dt class="col-md-5">VPN-адрес</dt><dd class="col-md-7">{{ draft.vpn_address }}</dd>
+      <dt class="col-md-5">Родительский узел</dt><dd class="col-md-7">{{ magos.name }}</dd>
+      <dt class="col-md-5">Пир установлен</dt><dd class="col-md-7">{{ 'Да' if seen.installed else 'Нет' }}</dd>
+      <dt class="col-md-5">Последний handshake</dt><dd class="col-md-7">{{ seen.handshake_age ~ ' сек. назад' if seen.handshake_age is not none else 'Ещё не было' }}</dd>
+      <dt class="col-md-5">Получено Magos от клиента</dt><dd class="col-md-7">{{ seen.rx_bytes }} байт</dd>
+      <dt class="col-md-5">Передано Magos клиенту</dt><dd class="col-md-7">{{ seen.tx_bytes }} байт</dd>
+    </dl>
+    <p class="text-muted small">Свежий handshake означает недавний обмен криптографическими сообщениями, но не доказывает доступность всех приложений и защищаемых объектов.</p>
+    {% endif %}
+    <a class="btn btn-sm btn-outline-modern" href="{{ url_for('cognitors.vpn_cognitor_status', draft_id=draft.id) }}">Обновить сведения</a>
+  </div>
+</div>
+{% endblock %}
