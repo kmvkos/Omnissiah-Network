@@ -523,6 +523,77 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
         self.assertEqual(self._wg_keys(), {self.old_public})
         self.assertEqual(self.config.read_bytes(), self.before_config)
 
+    def test_durable_uuid_blocks_reuse_for_a_new_topology_after_first_commit(self):
+        """At-most-once fence survives a successful real WireGuard update."""
+        from vpn_operation_fence import status
+        first_id, next_id = str(uuid.uuid4()), str(uuid.uuid4())
+        result = run_offline_mesh_transaction(
+            self.plan, self.desired["peers"], self.backend, self.state,
+            operation_id=first_id)
+        self.assertEqual(result["state"], "committed")
+        self.assertEqual(status(self.state, first_id)["state"], "committed")
+
+        _, another_key = keypair()
+        extended = copy.deepcopy(self.desired)
+        extended["peers"].append({
+            "public_key": another_key,
+            "endpoint": "192.0.2.5:51820",
+            "allowed_ips": ["10.77.0.5/32"],
+            "keepalive": 25,
+        })
+        from vpn_route_journal import prepare_transaction
+        peers, routes = self.backend.snapshot()
+        delta = prepare_transaction(extended["peers"], peers, routes)
+        next_backend = IsolatedLinuxMeshBackend(
+            extended, delta, state_dir=self.state,
+            config_path=self.config, runner=self._runner,
+            allow_mutations=True)
+        with self.assertRaisesRegex(MeshTransactionBlocked, "already used"):
+            run_offline_mesh_transaction(
+                delta, extended["peers"], next_backend, self.state,
+                operation_id=first_id)
+        self.assertEqual(self._route_set(), {OLD_ROUTE, NEW_ROUTE})
+        self.assertEqual(self._wg_keys(), {self.old_public, self.new_public})
+
+        updated = run_offline_mesh_transaction(
+            delta, extended["peers"], next_backend, self.state,
+            operation_id=next_id)
+        self.assertEqual(updated["state"], "committed")
+        self.assertEqual(status(self.state, next_id)["state"], "committed")
+        self.assertEqual(self._route_set(), {OLD_ROUTE, NEW_ROUTE, "10.77.0.5/32"})
+        self.assertEqual(self._wg_keys(), {self.old_public, self.new_public, another_key})
+
+    def test_sigkill_after_operation_reservation_prevents_any_new_apply(self):
+        """Even before backup/journal, an unknown accepted request blocks a retry."""
+        from vpn_operation_fence import status
+        from vpn_transaction_health import inspect_transaction
+        op_id, next_id = str(uuid.uuid4()), str(uuid.uuid4())
+        lock = self.state / "mesh-transaction.lock"
+        lock.touch(mode=0o600)
+        lock.chmod(0o600)
+
+        def work():
+            real_backup = self.backend.stage_backup
+
+            def kill_after_backup():
+                real_backup()
+                os.kill(os.getpid(), signal.SIGKILL)
+            self.backend.stage_backup = kill_after_backup
+            run_offline_mesh_transaction(
+                self.plan, self.desired["peers"], self.backend, self.state,
+                operation_id=op_id)
+
+        self._kill_forked_worker(work)
+        self.assertEqual(status(self.state, op_id)["state"], "reserved")
+        self.assertEqual(inspect_transaction(self.state)["reason"], "orphan_operation")
+        self.assertEqual(self._route_set(), {OLD_ROUTE})
+        self.assertEqual(self._wg_keys(), {self.old_public})
+        with self.assertRaisesRegex(MeshTransactionBlocked, "outcome unknown"):
+            run_offline_mesh_transaction(
+                self.plan, self.desired["peers"], self.backend, self.state,
+                operation_id=next_id)
+        self.assertEqual(status(self.state, next_id)["state"], "unknown")
+
     def test_sequential_real_peer_additions_preserve_existing_mesh(self):
         """Apply a third peer, then a fourth without disrupting previous routes."""
         first = run_offline_mesh_transaction(
