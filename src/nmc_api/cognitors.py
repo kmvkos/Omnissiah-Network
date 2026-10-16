@@ -201,3 +201,56 @@ def vpn_cognitor_apply(draft_id):
     flash("Cognitor добавлен на " + magos.name +
           ". Теперь установите WireGuard на клиенте и проверьте handshake.", "success")
     return redirect(url_for("cognitors.vpn_cognitors"))
+
+
+@cognitors_bp.route("/vpn/cognitors/<int:draft_id>/status", methods=["GET"])
+@login_required
+def vpn_cognitor_status(draft_id):
+    """Observe only the named client's public WireGuard peer over mTLS."""
+    if current_user.role != "admin":
+        abort(403)
+    draft = db.session.get(CognitorDraft, draft_id)
+    if draft is None:
+        abort(404)
+    magos = db.session.get(General, draft.parent_magos_id)
+    if magos is None or magos.role != "Magos":
+        abort(409)
+    seen = None
+    failure = None
+    try:
+        from app import _vpn_v2_send
+        from datetime import datetime, timezone
+        data = _vpn_v2_send(magos, "status")
+        if not isinstance(data, dict) or data.get("active") is not True:
+            raise ValueError("WireGuard inactive")
+        peers = data.get("peers")
+        if not isinstance(peers, list):
+            raise ValueError("Invalid peer list")
+        matches = [p for p in peers if isinstance(p, dict)
+                   and p.get("public_key") == draft.public_key]
+        if len(matches) > 1:
+            raise ValueError("Duplicate client public key")
+        if matches:
+            p = matches[0]
+            if p.get("allowed_ips") != [draft.vpn_address]:
+                raise ValueError("Cognitor AllowedIPs differ from registry")
+            last = p.get("latest_handshake", 0)
+            rx, tx = p.get("rx_bytes"), p.get("tx_bytes")
+            if (type(last) is not int or last < 0 or type(rx) is not int
+                    or type(tx) is not int or rx < 0 or tx < 0):
+                raise ValueError("Malformed WireGuard counters")
+            age = max(0, int(datetime.now(timezone.utc).timestamp()) - last) if last > 0 else None
+            seen = {"installed": True, "connected": age is not None and age <= 180,
+                    "handshake_age": age, "rx_bytes": rx, "tx_bytes": tx}
+        else:
+            seen = {"installed": False, "connected": False,
+                    "handshake_age": None, "rx_bytes": 0, "tx_bytes": 0}
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Cognitor status unavailable: draft id=%s, Magos=%s",
+            draft.id, magos.name, exc_info=True)
+        failure = ("Не удалось получить достоверный статус с Magos. "
+                   "Проверьте mTLS, WireGuard и журналы.")
+    return render_template("vpn_cognitor_status.html", draft=draft,
+                           magos=magos, seen=seen, failure=failure)
