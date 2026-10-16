@@ -144,17 +144,26 @@
       delay: 3
       until: heartbeat_probe.rc == 0
     - name: Verify agent HTTPS from the controller using its client identity
-      ansible.builtin.command:
-        argv:
-          - "{{ omnissiah_project_dir }}/venv/bin/python"
-          - "{{ omnissiah_project_dir }}/deploy/probe.py"
-          - agent
-          - --url
-          - "https://{{ ansible_host }}:{{ omnissiah_https_port }}/health"
-          - --pki
-          - "{{ omnissiah_state_dir }}/pki"
+      # sshpass can classify "Connection to ... closed." as UNREACHABLE when a
+      # delegated command exits nonzero. Capture the probe's real exit status
+      # while allowing SSH itself to complete successfully, then fail visibly.
+      ansible.builtin.shell: |
+        probe_output=$(
+          {{ (omnissiah_project_dir ~ '/venv/bin/python') | quote }} \
+          {{ (omnissiah_project_dir ~ '/deploy/probe.py') | quote }} \
+          agent --url {{ ('https://' ~ ansible_host ~ ':' ~ (omnissiah_https_port | string) ~ '/health') | quote }} \
+          --pki {{ (omnissiah_state_dir ~ '/pki') | quote }} 2>&1
+        )
+        probe_rc=$?
+        printf '%s\n' "$probe_output"
+        printf 'OMNISSIAH_PROBE_RC=%s\n' "$probe_rc"
+        exit 0
+      args:
+        executable: /bin/sh
       delegate_to: "{{ groups.omnissiah[0] }}"
+      register: agent_https_probe
       changed_when: false
+      failed_when: "'OMNISSIAH_PROBE_RC=0' not in agent_https_probe.stdout_lines"
     - name: Report successful enrollment
       ansible.builtin.debug:
         msg: "{{ inventory_hostname }}: authenticated heartbeat and controller-to-agent HTTPS succeeded. VPN is not yet configured."

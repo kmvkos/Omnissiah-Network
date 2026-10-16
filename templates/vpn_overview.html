@@ -101,9 +101,12 @@ async function vpnPreviewChanges() {
     target.replaceChildren();
     for (const item of data.results) {
       const row = document.createElement('tr');
+      const delta = item.route_delta;
+      const routeText = delta ? ' (добавить: ' + (delta.add || []).join(', ') +
+        '; удалить: ' + (delta.remove || []).join(', ') + ')' : '';
       const verdict = item.decision === 'no_change' ? 'Без изменений'
         : item.decision === 'eligible' ? 'Можно подготовить к применению'
-        : 'Заблокировано: ' + item.reason;
+        : 'Изменение заблокировано: ' + item.reason + routeText;
       for (const value of [item.node_name, item.add, item.remove, item.update, verdict]) {
         const td = document.createElement('td');
         td.textContent = String(value);

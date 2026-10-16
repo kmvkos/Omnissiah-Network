@@ -70,6 +70,17 @@
     mode: '0700'
   when: inventory_hostname in groups.magos
 
+- name: Install read-only route preflight module on Magos
+  ansible.builtin.copy:
+    src: "{{ omnissiah_project_dir }}/deploy/vpn_route_tx.py"
+    dest: /usr/local/libexec/vpn_route_tx.py
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0644'
+  when: inventory_hostname in groups.magos
+  notify: Restart VPN RPC
+
 - name: Install WireGuard read-only reconciliation parser on Magos
   ansible.builtin.copy:
     src: "{{ omnissiah_project_dir }}/deploy/vpn_reconcile.py"

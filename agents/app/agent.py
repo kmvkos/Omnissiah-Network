@@ -75,10 +75,10 @@ def vpn_control_v2():
     if not isinstance(data, dict) or set(data) - {"action", "plan"}:
         return jsonify(error="Invalid VPN control payload"), 400
     action = data.get("action")
-    if action not in ("identity", "status", "prepare", "start", "apply"):
+    if action not in ("identity", "status", "prepare", "start", "apply", "route-preview"):
         return jsonify(error="Unsupported VPN operation"), 400
     plan = data.get("plan")
-    if action in ("prepare", "apply"):
+    if action in ("prepare", "apply", "route-preview"):
         if not isinstance(plan, dict):
             return jsonify(error="A VPN plan is required"), 400
         if plan.get("node_name") != config.get("name") or plan.get("address") != config.get("ip_pool"):
