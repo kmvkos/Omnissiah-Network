@@ -1,0 +1,22 @@
+[Unit]
+Description=Omnissiah safe prepared-phase VPN journal reconciliation
+Documentation=man:systemd.service(5)
+# Never pull wg-quick in automatically. Run only after any wg-quick boot
+# startup; if wg0 does not exist, the script fails closed without network writes.
+After=local-fs.target wg-quick@wg0.service
+ConditionPathExists=/var/lib/omnissiah-network/vpn/mesh-transaction.json
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/bin/python3 /usr/local/libexec/omnissiah-vpn-prepared-recover
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/omnissiah-network/vpn
+
+[Install]
+WantedBy=multi-user.target

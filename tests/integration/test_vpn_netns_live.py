@@ -166,6 +166,46 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
         self.assertFalse((self.state / "mesh-backup.json").exists())
 
 
+    def test_crashed_prepared_journal_recovers_without_changing_live_wg(self):
+        """Recovery after a durable backup but before first kernel write."""
+        from vpn_route_executor_sim import _durable_write
+        from vpn_prepared_recovery import reconcile_prepared
+        # The coordinator creates the exclusive lock before staging a backup.
+        lock_path = self.state / "mesh-transaction.lock"
+        lock_path.touch(mode=0o600)
+        lock_path.chmod(0o600)
+        self.backend.stage_backup()
+        _durable_write(self.state, "mesh-transaction.json", {
+            "schema_version": 1, "state": "prepared", "phase": "none",
+            "snapshot_sha256": self.plan["snapshot_sha256"], "route_ops": 0})
+        result = reconcile_prepared(self.state, self.backend)
+        self.assertEqual(result, {"state": "rolled_back", "changed": True})
+        self.assertEqual(self._route_set(), {OLD_ROUTE})
+        self.assertEqual(self._wg_keys(), {self.old_public})
+        self.assertEqual(self.config.read_bytes(), self.before_config)
+        self.assertEqual(self._runner(
+            ["wg", "showconf", "wg0"], capture_output=True, text=True,
+            timeout=20, check=False).stdout, self.before_wg)
+
+    def test_prepared_journal_does_not_recover_after_foreign_wireguard_change(self):
+        """Refuse if a journal claims prepared but kernel peers have drifted."""
+        from vpn_route_executor_sim import _durable_write
+        from vpn_prepared_recovery import reconcile_prepared, PreparedRecoveryBlocked
+        lock_path = self.state / "mesh-transaction.lock"
+        lock_path.touch(mode=0o600)
+        lock_path.chmod(0o600)
+        self.backend.stage_backup()
+        _durable_write(self.state, "mesh-transaction.json", {
+            "schema_version": 1, "state": "prepared", "phase": "none",
+            "snapshot_sha256": self.plan["snapshot_sha256"], "route_ops": 0})
+        # Simulate a foreign process modifying the running interface.
+        self.backend.sync_wireguard(self.desired["peers"])
+        with self.assertRaisesRegex(PreparedRecoveryBlocked, "Original state changed"):
+            reconcile_prepared(self.state, self.backend)
+        self.assertEqual(json.loads(
+            (self.state / "mesh-transaction.json").read_text())["state"], "prepared")
+        self.assertEqual(self._wg_keys(), {self.old_public, self.new_public})
+
     def test_sequential_real_peer_additions_preserve_existing_mesh(self):
         """Apply a third peer, then a fourth without disrupting previous routes."""
         first = run_offline_mesh_transaction(
