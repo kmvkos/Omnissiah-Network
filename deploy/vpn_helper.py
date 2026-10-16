@@ -236,6 +236,8 @@ def main():
                              "client_address", "public_key", "expected_revision"}:
             raise HelperError("Invalid Cognitor add schema")
         revision = raw_plan.pop("expected_revision")
+        if raw_plan.get("node_name") != args.node_name:
+            raise HelperError("Cognitor operation belongs to another Magos")
         if subprocess.run(["wg", "show", IFACE], capture_output=True).returncode:
             raise HelperError("Cannot add Cognitor to inactive WireGuard")
         from vpn_cognitor_transaction import add_cognitor
