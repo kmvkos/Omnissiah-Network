@@ -123,6 +123,18 @@
   when: inventory_hostname in groups.magos
   notify: Restart VPN RPC
 
+# Verify that the import graph resolves in the *installed* layout.
+# The earlier lab failure only appeared on the VMs because the test runner
+# imported directly from deploy/ instead of /usr/local/libexec.
+- name: Verify installed Magos VPN transaction Python imports
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -c
+      - "import sys; sys.path.insert(0, '/usr/local/libexec'); from vpn_linux_backend import IsolatedLinuxMeshBackend; from vpn_mesh_transaction import run_offline_mesh_transaction"
+  changed_when: false
+  when: inventory_hostname in groups.magos
+
 - name: Install restricted VPN RPC server on Magos
   ansible.builtin.copy:
     src: "{{ omnissiah_project_dir }}/deploy/vpn_rpc.py"
