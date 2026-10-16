@@ -14,6 +14,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import fcntl
 
 STATE = Path("/var/lib/omnissiah-network/vpn")
 WG_DIR = Path("/etc/wireguard")
@@ -136,7 +137,7 @@ def verify_active_peers(data):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["identity", "validate", "prepare", "start", "apply", "status", "route-preview"])
+    parser.add_argument("command", choices=["identity", "validate", "prepare", "start", "apply", "status", "route-preview", "route-transaction"])
     parser.add_argument("--node-name", required=True)
     parser.add_argument("--plan", type=Path)
     args = parser.parse_args()
@@ -212,6 +213,32 @@ def main():
             raise HelperError("Unsafe route delta: " + str(exc)) from exc
         print(json.dumps({"safe_to_plan": True, "writes_performed": False,
                           "route_delta": result}))
+        return
+    if args.command == "route-transaction":
+        # Explicit opt-in only: never modify running routes through ordinary apply.
+        if os.environ.get("OMNISSIAH_ENABLE_ROUTE_TRANSACTIONS") != "YES":
+            raise HelperError("Route transactions are disabled")
+        if subprocess.run(["wg", "show", IFACE], capture_output=True).returncode:
+            raise HelperError("Cannot transact routes with inactive WireGuard")
+        from vpn_linux_backend import IsolatedLinuxMeshBackend
+        from vpn_mesh_transaction import run_offline_mesh_transaction
+        from vpn_route_journal import prepare_transaction
+        from vpn_linux_preflight import LinuxReadOnlyPreflight
+        from vpn_route_executor_sim import TransactionBlocked
+        # This prevents a second operation during preflight; the transaction
+        # coordinator also takes its own lock during all mutations.
+        STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
+        peers, routes = LinuxReadOnlyPreflight().snapshot()
+        transaction = prepare_transaction(data["peers"], peers, routes)
+        backend = IsolatedLinuxMeshBackend(
+            data, transaction, state_dir=STATE,
+            config_path=WG_DIR / "wg0.conf", allow_mutations=True)
+        try:
+            result = run_offline_mesh_transaction(
+                transaction, data["peers"], backend, STATE)
+        except (TransactionBlocked, ValueError) as exc:
+            raise HelperError("Route transaction refused: " + str(exc)) from exc
+        print(json.dumps(result))
         return
     secret = STATE / "private.key"
     if not secret.is_file() or secret.is_symlink():
