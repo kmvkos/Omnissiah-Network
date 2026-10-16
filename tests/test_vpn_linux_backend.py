@@ -135,3 +135,44 @@ def test_no_runtime_api_integration():
     for name in ("vpn_rpc.py", "vpn_helper.py"):
         content = (ROOT / "deploy" / name).read_text()
         assert "vpn_linux_backend" not in content
+
+
+def test_completed_transaction_backup_is_archived_before_next_stage(tmp_path, monkeypatch):
+    backend, _, state, plan = make_backend(tmp_path)
+    monkeypatch.setattr(backend, "_require_enabled", lambda: None)
+    monkeypatch.setattr(backend, "_config_bytes",
+                        lambda: b"# Managed by Omnissiah VPN v2\\nold-config")
+    monkeypatch.setattr(backend, "_command",
+                        lambda argv, **kwargs: "OLD-LIVE-CONFIG\\n")
+    monkeypatch.setattr(backend, "snapshot",
+                        lambda: (list(BASE["peers"]), list(ROUTES)))
+    backend.stage_backup()
+    first = (state / "mesh-backup.json").read_bytes()
+    from vpn_route_executor_sim import _durable_write
+    _durable_write(state, "mesh-transaction.json",
+                   {"schema_version": 1, "state": "committed",
+                    "snapshot_sha256": plan["snapshot_sha256"]})
+    backend.stage_backup()
+    archived = list(state.glob("mesh-backup-*.json"))
+    assert len(archived) == 1
+    assert archived[0].read_bytes() == first
+    assert archived[0].stat().st_mode & 0o077 == 0
+    assert (state / "mesh-backup.json").is_file()
+
+
+def test_unresolved_previous_backup_still_fails_closed(tmp_path, monkeypatch):
+    backend, _, state, plan = make_backend(tmp_path)
+    monkeypatch.setattr(backend, "_require_enabled", lambda: None)
+    monkeypatch.setattr(backend, "_config_bytes",
+                        lambda: b"# Managed by Omnissiah VPN v2\\nold-config")
+    monkeypatch.setattr(backend, "_command", lambda argv, **kwargs: "OLD\\n")
+    monkeypatch.setattr(backend, "snapshot",
+                        lambda: (list(BASE["peers"]), list(ROUTES)))
+    backend.stage_backup()
+    from vpn_route_executor_sim import _durable_write
+    _durable_write(state, "mesh-transaction.json",
+                   {"schema_version": 1, "state": "applying",
+                    "snapshot_sha256": plan["snapshot_sha256"]})
+    with pytest.raises(TransactionBlocked, match="Unresolved backup"):
+        backend.stage_backup()
+    assert not list(state.glob("mesh-backup-*.json"))
