@@ -120,6 +120,7 @@
     - vpn_mesh_transaction.py
     - vpn_route_journal.py
     - vpn_route_executor_sim.py
+    - vpn_transaction_health.py
   when: inventory_hostname in groups.magos
   notify: Restart VPN RPC
 
