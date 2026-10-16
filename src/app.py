@@ -3151,7 +3151,6 @@ def reconcile_vpn_mesh():
     from vpn_topology import project_magos_mesh
     from vpn_plan import VPNPlanError
     from vpn_reconcile import compare
-    import concurrent.futures
     nodes = General.query.filter_by(role='Magos').all()
     by_id = {n.id: n for n in nodes}
     try:
@@ -3164,13 +3163,14 @@ def reconcile_vpn_mesh():
         try:
             result = _vpn_v2_send(node, "status")
             return plan["node_id"], result, None
-        except (ValueError, requests.RequestException, OSError, KeyError) as exc:
+        except (ValueError, requests.RequestException, OSError, KeyError, RuntimeError) as exc:
             app.logger.warning("VPN status poll failed for %s: %s", node.name, exc)
             return plan["node_id"], None, "management_query_failed"
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(plans), 8) or 1) as pool:
-        observed = {node_id: (status, error)
-                    for node_id, status, error in pool.map(poll, plans)}
+    # _vpn_v2_send reads the controller SQLAlchemy model: perform calls inside
+    # the request application context, not in contextless worker threads.
+    observed = {node_id: (status, error)
+                for node_id, status, error in map(poll, plans)}
     records = []
     for plan in plans:
         state, error = observed[plan["node_id"]]
