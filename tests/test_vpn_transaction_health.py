@@ -148,3 +148,30 @@ def test_missing_lockfile_with_existing_journal_fails_closed(tmp_path):
     result = module.inspect_transaction(folder)
     assert result["state"] == "recovery_required"
     assert result["reason"] == "missing_lock_file"
+
+
+def test_orphan_backup_with_transaction_lock_requires_attention(tmp_path):
+    folder = root_dir(tmp_path)
+    lock = folder / "mesh-transaction.lock"
+    lock.touch(mode=0o600)
+    lock.chmod(0o600)
+    backup = folder / "mesh-backup.json"
+    backup.write_text("not inspected; no matching journal")
+    backup.chmod(0o600)
+    result = module.inspect_transaction(folder)
+    assert result["state"] == "recovery_required"
+    assert result["needs_attention"] is True
+    assert result["reason"] == "orphan_backup"
+    assert result["backup_verified"] is False
+    assert backup.read_text() == "not inspected; no matching journal"
+
+
+def test_orphan_backup_without_lock_is_not_reported_idle(tmp_path):
+    folder = root_dir(tmp_path)
+    backup = folder / "mesh-backup.json"
+    backup.write_text("orphan")
+    backup.chmod(0o600)
+    result = module.inspect_transaction(folder)
+    assert result["reason"] == "orphan_backup"
+    assert result["needs_attention"] is True
+    assert not (folder / "mesh-transaction.lock").exists()

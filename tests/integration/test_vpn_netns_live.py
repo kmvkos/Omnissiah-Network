@@ -3,13 +3,15 @@
 Run only in a disposable GitHub Actions runner as root. Nothing in this test is
 installed by Ansible and no host wg0, routes, or VPN config are touched.
 
-This suite deliberately does not simulate host reboot recovery: an interrupted
-journal blocks further operations pending explicit manual recovery.
+Includes real SIGKILL of a forked transaction/recovery process at selected
+journaling boundaries, not a simulated exception or a full VM power loss.
 """
 import copy
 import json
 from ipaddress import ip_network
 import os
+import signal
+import time
 from pathlib import Path
 import subprocess
 import sys
@@ -312,6 +314,214 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
         with self.assertRaisesRegex(AddOnlyRecoveryBlocked, "descriptor"):
             reconcile_add_only(self.state, self.backend, ["10.77.0.2"])
         self.assertEqual(self._route_set(), {OLD_ROUTE, NEW_ROUTE})
+
+    def _kill_forked_worker(self, action):
+        """Kill only a disposable forked worker, never the CI test runner."""
+        pid = os.fork()
+        if pid == 0:
+            try:
+                action()
+            except BaseException:
+                os._exit(84)
+            os._exit(85)
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            observed, status = os.waitpid(pid, os.WNOHANG)
+            if observed:
+                self.assertTrue(os.WIFSIGNALED(status),
+                                "Worker exited without injected SIGKILL: " + str(status))
+                self.assertEqual(os.WTERMSIG(status), signal.SIGKILL)
+                return
+            time.sleep(0.02)
+        # A stuck process must not hang or poison the CI runner.
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+        self.fail("Worker timed out instead of hitting the injected kill point")
+
+    def _run_transaction_with_sigkill(self, boundary):
+        """Real coordinator + real commands; kill after a precise journaled step."""
+        lockfile = self.state / "mesh-transaction.lock"
+        lockfile.touch(mode=0o600)
+        lockfile.chmod(0o600)
+
+        def work():
+            if boundary == "after_wg_sync":
+                original = self.backend.sync_wireguard
+
+                def kill_after_sync(desired):
+                    original(desired)
+                    os.kill(os.getpid(), signal.SIGKILL)
+                self.backend.sync_wireguard = kill_after_sync
+            else:
+                original = self.backend.route_step
+
+                def kill_route_step(step):
+                    if boundary == "before_route_write":
+                        os.kill(os.getpid(), signal.SIGKILL)
+                    original(step)
+                    if boundary == "after_route_write":
+                        os.kill(os.getpid(), signal.SIGKILL)
+                self.backend.route_step = kill_route_step
+            run_offline_mesh_transaction(
+                self.plan, self.desired["peers"], self.backend, self.state)
+
+        self._kill_forked_worker(work)
+        return json.loads((self.state / "mesh-transaction.json").read_text())
+
+    def test_sigkill_after_backup_before_journal_detects_orphan_and_blocks(self):
+        """A durable backup with no journal is not an idle VPN."""
+        from vpn_transaction_health import inspect_transaction
+        from vpn_route_executor_sim import TransactionBlocked
+        lock = self.state / "mesh-transaction.lock"
+        lock.touch(mode=0o600)
+        lock.chmod(0o600)
+
+        def work():
+            original = self.backend.stage_backup
+
+            def kill_after_backup():
+                original()
+                os.kill(os.getpid(), signal.SIGKILL)
+            self.backend.stage_backup = kill_after_backup
+            run_offline_mesh_transaction(
+                self.plan, self.desired["peers"], self.backend, self.state)
+
+        self._kill_forked_worker(work)
+        self.assertTrue((self.state / "mesh-backup.json").exists())
+        self.assertFalse((self.state / "mesh-transaction.json").exists())
+        state = inspect_transaction(self.state)
+        self.assertEqual((state["state"], state["reason"]),
+                         ("recovery_required", "orphan_backup"))
+        self.assertTrue(state["needs_attention"])
+        self.assertEqual(self._wg_keys(), {self.old_public})
+        self.assertEqual(self._route_set(), {OLD_ROUTE})
+        with self.assertRaisesRegex(TransactionBlocked, "Unresolved backup"):
+            run_offline_mesh_transaction(
+                self.plan, self.desired["peers"], self.backend, self.state)
+
+    def test_sigkill_after_prepared_journal_recovers_without_network_changes(self):
+        """Actual process is killed after durable prepared journal, before WG sync."""
+        import vpn_mesh_transaction
+        from vpn_prepared_recovery import reconcile_prepared
+        lock = self.state / "mesh-transaction.lock"
+        lock.touch(mode=0o600)
+        lock.chmod(0o600)
+
+        def work():
+            original = vpn_mesh_transaction._journal
+
+            def kill_after_prepared(folder, record):
+                original(folder, record)
+                if record.get("state") == "prepared":
+                    os.kill(os.getpid(), signal.SIGKILL)
+            vpn_mesh_transaction._journal = kill_after_prepared
+            run_offline_mesh_transaction(
+                self.plan, self.desired["peers"], self.backend, self.state)
+
+        self._kill_forked_worker(work)
+        saved = json.loads((self.state / "mesh-transaction.json").read_text())
+        self.assertEqual((saved["state"], saved["phase"]), ("prepared", "none"))
+        self.assertEqual(self._wg_keys(), {self.old_public})
+        self.assertEqual(self._route_set(), {OLD_ROUTE})
+        self.assertEqual(reconcile_prepared(
+            self.state, self.backend), {"state": "rolled_back", "changed": True})
+        self.assertEqual(self._wg_keys(), {self.old_public})
+        self.assertEqual(self._route_set(), {OLD_ROUTE})
+        self.assertEqual(self.config.read_bytes(), self.before_config)
+
+    def test_sigkill_after_wg_sync_fails_closed_at_nonrecoverable_phase(self):
+        """Real kernel new peer exists, but old route/peer must remain untouched."""
+        from vpn_add_only_recovery import reconcile_add_only, AddOnlyRecoveryBlocked
+        record = self._run_transaction_with_sigkill("after_wg_sync")
+        self.assertEqual((record["state"], record["phase"]), ("applying", "wg_sync"))
+        self.assertEqual(self._wg_keys(), {self.old_public, self.new_public})
+        self.assertEqual(self._route_set(), {OLD_ROUTE})
+        with self.assertRaisesRegex(AddOnlyRecoveryBlocked, "not recoverable"):
+            reconcile_add_only(self.state, self.backend, ["10.77.0.2"])
+        self.assertEqual(self._wg_keys(), {self.old_public, self.new_public})
+        self.assertEqual(self._route_set(), {OLD_ROUTE})
+        self.assertEqual(self.config.read_bytes(), self.before_config)
+
+    def test_sigkill_before_first_route_write_then_recover(self):
+        """A fresh process validates and removes the new peer after SIGKILL."""
+        from vpn_add_only_recovery import reconcile_add_only
+        record = self._run_transaction_with_sigkill("before_route_write")
+        self.assertEqual((record["state"], record["phase"]), ("applying", "route"))
+        self.assertEqual(record["route_ops"], 0)
+        self.assertEqual(self._wg_keys(), {self.old_public, self.new_public})
+        self.assertEqual(self._route_set(), {OLD_ROUTE})
+        result = reconcile_add_only(self.state, self.backend, ["10.77.0.2"])
+        self.assertEqual(result, {"state": "rolled_back", "changed": True})
+        self.assertEqual(self._wg_keys(), {self.old_public})
+        self.assertEqual(self._route_set(), {OLD_ROUTE})
+        self.assertEqual(self.config.read_bytes(), self.before_config)
+
+    def test_sigkill_after_route_written_before_journal_ack_then_recover(self):
+        """A route command can succeed immediately before the worker dies."""
+        from vpn_add_only_recovery import reconcile_add_only
+        record = self._run_transaction_with_sigkill("after_route_write")
+        self.assertEqual((record["state"], record["phase"]), ("applying", "route"))
+        self.assertEqual(record["route_ops"], 0)
+        self.assertEqual(record["pending_route"], self.plan["steps"][0])
+        self.assertEqual(self._wg_keys(), {self.old_public, self.new_public})
+        self.assertEqual(self._route_set(), {OLD_ROUTE, NEW_ROUTE})
+        self.assertEqual(reconcile_add_only(
+            self.state, self.backend, ["10.77.0.2"])["state"], "rolled_back")
+        self.assertEqual(self._wg_keys(), {self.old_public})
+        self.assertEqual(self._route_set(), {OLD_ROUTE})
+        self.assertEqual(self.config.read_bytes(), self.before_config)
+
+    def test_sigkill_during_recovery_then_resume_without_old_peer_damage(self):
+        """Kill cleanup after actual route delete, recover again under same lock."""
+        from vpn_add_only_recovery import reconcile_add_only
+        self._run_transaction_with_sigkill("after_route_write")
+
+        def work():
+            original = self.backend._command
+
+            def kill_after_delete(argv, **kwargs):
+                result = original(argv, **kwargs)
+                if argv[:4] == ["ip", "-4", "route", "delete"]:
+                    os.kill(os.getpid(), signal.SIGKILL)
+                return result
+            self.backend._command = kill_after_delete
+            reconcile_add_only(self.state, self.backend, ["10.77.0.2"])
+
+        self._kill_forked_worker(work)
+        record = json.loads((self.state / "mesh-transaction.json").read_text())
+        self.assertEqual((record["state"], record["phase"]),
+                         ("rolling_back", "add_only_recovery"))
+        self.assertEqual(self._route_set(), {OLD_ROUTE})
+        self.assertEqual(self._wg_keys(), {self.old_public, self.new_public})
+        self.assertEqual(reconcile_add_only(
+            self.state, self.backend, ["10.77.0.2"])["state"], "rolled_back")
+        self.assertEqual(self._route_set(), {OLD_ROUTE})
+        self.assertEqual(self._wg_keys(), {self.old_public})
+        self.assertEqual(self.config.read_bytes(), self.before_config)
+
+    def test_sigkill_after_final_peer_delete_recovery_is_idempotent(self):
+        """Recovery can finish if process dies after network is already restored."""
+        from vpn_add_only_recovery import reconcile_add_only
+        self._run_transaction_with_sigkill("after_route_write")
+
+        def work():
+            original = self.backend._command
+
+            def kill_after_peer_delete(argv, **kwargs):
+                result = original(argv, **kwargs)
+                if argv[:4] == ["wg", "set", "wg0", "peer"] and argv[-1] == "remove":
+                    os.kill(os.getpid(), signal.SIGKILL)
+                return result
+            self.backend._command = kill_after_peer_delete
+            reconcile_add_only(self.state, self.backend, ["10.77.0.2"])
+
+        self._kill_forked_worker(work)
+        self.assertEqual(self._route_set(), {OLD_ROUTE})
+        self.assertEqual(self._wg_keys(), {self.old_public})
+        self.assertEqual(reconcile_add_only(
+            self.state, self.backend, ["10.77.0.2"])["state"], "rolled_back")
+        self.assertEqual(self._wg_keys(), {self.old_public})
+        self.assertEqual(self.config.read_bytes(), self.before_config)
 
     def test_sequential_real_peer_additions_preserve_existing_mesh(self):
         """Apply a third peer, then a fourth without disrupting previous routes."""
