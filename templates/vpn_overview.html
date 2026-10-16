@@ -36,6 +36,22 @@
   <div class="premium-card p-4 mb-4">
     <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
       <div>
+        <h5 class="mb-1">Журнал VPN-транзакций</h5>
+        <p class="text-muted small mb-0">Только чтение. Результат проверки локального журнала и резервной копии каждого Magos. Приватные ключи не показываются.</p>
+      </div>
+      <button id="vpnTxHealthBtn" type="button" class="btn btn-outline-modern" onclick="vpnCheckTransactionHealth()">Проверить транзакции</button>
+    </div>
+    <p role="status" id="vpnTxHealthMessage" class="text-muted small">Проверка ещё не выполнялась.</p>
+    <div class="table-responsive">
+      <table class="table table-dark premium-table">
+        <thead><tr><th>Magos</th><th>Состояние</th><th>Этап</th><th>Маршрутных операций</th><th>Требует внимания</th></tr></thead>
+        <tbody id="vpnTxHealthRows"><tr><td colspan="5" class="text-muted text-center">Нет данных</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="premium-card p-4 mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+      <div>
         <h5 class="mb-1">Desired / Actual</h5>
         <p class="text-muted small mb-0">Сверка фактического WireGuard с конфигурацией контроллера. Только чтение, без применения или перезапуска.</p>
       </div>
@@ -83,6 +99,46 @@
 </div>
 {% endblock %}
 {% block scripts %}
+<script>
+async function vpnCheckTransactionHealth() {
+  const button = document.getElementById('vpnTxHealthBtn');
+  const message = document.getElementById('vpnTxHealthMessage');
+  const target = document.getElementById('vpnTxHealthRows');
+  button.disabled = true;
+  message.textContent = 'Проверяю журналы на Magos через mTLS...';
+  try {
+    const response = await fetch('{{ url_for("vpn_mesh_transaction_status") }}', {
+      credentials: 'same-origin', cache: 'no-store'
+    });
+    if (!(response.headers.get('content-type') || '').includes('application/json')) {
+      throw Error('Сервер вернул HTTP ' + response.status + ' вместо JSON');
+    }
+    const data = await response.json();
+    if (!response.ok || !Array.isArray(data.results)) {
+      throw Error(data.error || 'HTTP ' + response.status);
+    }
+    target.replaceChildren();
+    for (const item of data.results) {
+      const row = document.createElement('tr');
+      const attention = item.needs_attention === true ? 'Требуется проверка'
+        : item.needs_attention === false ? 'Нет' : 'Неизвестно';
+      const values = [item.node_name, item.state, item.phase, item.route_ops, attention];
+      for (let index = 0; index < values.length; index++) {
+        const cell = document.createElement('td');
+        cell.textContent = String(values[index]);
+        if (index === 4 && item.needs_attention === true) cell.className = 'text-danger';
+        row.appendChild(cell);
+      }
+      target.appendChild(row);
+    }
+    message.textContent = 'Проверено. Никакие изменения VPN не выполнялись.';
+  } catch (error) {
+    message.textContent = 'Ошибка чтения журналов: ' + error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+</script>
 <script>
 async function applyVpnRouteTransaction(nodeId, nodeName, previewRevision, button) {
   if (!confirm('Изменить работающий WireGuard и маршруты узла ' + nodeName +
