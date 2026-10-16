@@ -90,3 +90,32 @@ def test_route_preview_is_root_helper_read_only_command():
     assert 'writes_performed": False' in block
     assert '["ip", "route", "add"' not in block
     assert '["ip", "route", "del"' not in block
+
+
+def test_route_transaction_requires_trusted_management_addresses():
+    old = [{"allowed_ips": ["10.77.0.3/32"],
+            "endpoint": "192.168.32.169:51820"}]
+    new = old + [{"allowed_ips": ["10.77.0.4/32"],
+                  "endpoint": "192.168.32.170:51820"}]
+    with pytest.raises(mod.RouteConflict, match="not configured"):
+        mod.reject_protected_host_routes(new, old, [])
+    assert mod.reject_protected_host_routes(new, old, ["192.168.32.167"])
+
+
+def test_reject_hijack_of_management_or_peer_underlay():
+    peer = [{"allowed_ips": ["192.168.32.167/32"],
+             "endpoint": "192.168.32.170:51820"}]
+    with pytest.raises(mod.RouteConflict, match="intersects"):
+        mod.reject_protected_host_routes(peer, [], ["192.168.32.167"])
+    peer[0]["allowed_ips"] = ["192.168.32.170/32"]
+    with pytest.raises(mod.RouteConflict, match="intersects"):
+        mod.reject_protected_host_routes(peer, [], ["192.168.32.167"])
+
+
+def test_all_peer_endpoints_protected_even_when_declared_later():
+    desired = [
+        {"allowed_ips": ["192.168.32.170/32"], "endpoint": "192.0.2.9:51820"},
+        {"allowed_ips": ["10.77.0.5/32"], "endpoint": "192.168.32.170:51820"},
+    ]
+    with pytest.raises(mod.RouteConflict, match="intersects"):
+        mod.reject_protected_host_routes(desired, [], ["192.168.32.167"])
