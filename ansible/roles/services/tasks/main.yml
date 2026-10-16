@@ -92,6 +92,23 @@
   when: inventory_hostname in groups.magos
   notify: Restart VPN RPC
 
+- name: Install root-only transaction modules on Magos (feature disabled by default)
+  ansible.builtin.copy:
+    src: "{{ omnissiah_project_dir }}/deploy/{{ item }}"
+    dest: "/usr/local/libexec/{{ item }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - vpn_linux_backend.py
+    - vpn_linux_preflight.py
+    - vpn_mesh_transaction.py
+    - vpn_route_journal.py
+    - vpn_route_executor_sim.py
+  when: inventory_hostname in groups.magos
+  notify: Restart VPN RPC
+
 - name: Install restricted VPN RPC server on Magos
   ansible.builtin.copy:
     src: "{{ omnissiah_project_dir }}/deploy/vpn_rpc.py"
