@@ -39,7 +39,7 @@ def _check_plan(plan):
         raise MeshTransactionBlocked("Inconsistent rollback plan")
 
 
-def run_offline_mesh_transaction(plan, desired, backend, journal_directory):
+def run_offline_mesh_transaction(plan, desired, backend, journal_directory, *, operation_id=None):
     """Orchestrate a fault-injectable offline transaction.
 
     Backend contract: snapshot()->(wg_peers, routes), stage_backup(),
@@ -68,6 +68,15 @@ def run_offline_mesh_transaction(plan, desired, backend, journal_directory):
         canonical = prepare_transaction(desired, peers, routes)
         if canonical != plan:
             raise MeshTransactionBlocked("Preview does not match desired state")
+        from vpn_operation_fence import reserve, finish, _load
+        # Legacy offline tests do not pass operation IDs. Even those callers
+        # must not evade an unresolved real attempt's durable fence.
+        if operation_id is None:
+            if any(item["state"] == "reserved" for item in
+                   _load(directory)["operations"].values()):
+                raise MeshTransactionBlocked("Unresolved operation fence; inspect journal")
+        else:
+            reserve(directory, operation_id, plan, desired)
         # Backups MUST exist before journal enters 'prepared'. A real backend
         # must durably persist original wg/file/route state; never journal keys.
         backend.stage_backup()
@@ -77,6 +86,8 @@ def run_offline_mesh_transaction(plan, desired, backend, journal_directory):
         rec = {"schema_version": 1, "state": "prepared", "phase": "none",
                "snapshot_sha256": plan["snapshot_sha256"], "route_ops": 0,
                "recovery": {"desired_peers": desired}}
+        if operation_id is not None:
+            rec["operation_id"] = operation_id
         _journal(directory, rec)
         try:
             rec.update(state="applying", phase="wg_sync")
@@ -97,7 +108,6 @@ def run_offline_mesh_transaction(plan, desired, backend, journal_directory):
             backend.persist_config(desired)
             rec.update(state="committed", phase="done")
             _journal(directory, rec)
-            return {"state": "committed", "route_ops": rec["route_ops"]}
         except Exception as original:
             rec.update(state="rolling_back", phase="restore")
             _journal(directory, rec)
@@ -114,4 +124,12 @@ def run_offline_mesh_transaction(plan, desired, backend, journal_directory):
                 raise MeshTransactionBlocked("Automatic rollback failed; manual recovery required") from recovery_error
             rec.update(state="rolled_back", phase="done")
             _journal(directory, rec)
+            if operation_id is not None:
+                finish(directory, operation_id, "rolled_back")
             raise original
+        # Finishing the bookkeeping may itself fail. Do not try to roll back
+        # a completed kernel transaction on a ledger I/O error: leave its
+        # reserved operation blocked for an operator to reconcile with journal.
+        if operation_id is not None:
+            finish(directory, operation_id, "committed")
+        return {"state": "committed", "route_ops": rec["route_ops"]}
