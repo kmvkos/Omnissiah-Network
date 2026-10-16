@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+from ipaddress import ip_network
 import subprocess
 import sys
 import tempfile
@@ -108,13 +109,13 @@ class CognitorLiveNetnsTest(unittest.TestCase):
         for key, value in old.items():
             self.assertEqual(new[key], value)
         self.assertEqual(new[self.plan["public_key"]][0], ["10.77.0.5/32"])
-        self.assertIn("10.77.0.5/32", {r.get("dst") for r in routes})
+        self.assertIn("10.77.0.5/32", {str(ip_network(r["dst"], strict=False)) for r in routes if r.get("dst") and r["dst"] != "default"})
         self.assertIn(self.plan["public_key"], self.file.read_text())
         self.assertIn("# Cognitor: cognitor01", self.file.read_text())
         record = json.loads((self.state / "mesh-transaction.json").read_text())
         self.assertEqual(record["state"], "committed")
         self.assertEqual(record["route_ops"], 1)
-        self.assertNotIn(secret if False else "PrivateKey", json.dumps(record))
+        self.assertNotIn("PrivateKey", json.dumps(record))
 
     def test_route_failure_after_mutation_rolls_back_client_only(self):
         def runner(argv, **kw):
@@ -132,7 +133,7 @@ class CognitorLiveNetnsTest(unittest.TestCase):
         peers, routes = self.snapshot()
         self.assertEqual({p["public_key"] for p in peers},
                          {p["public_key"] for p in self.initial[0]})
-        self.assertNotIn("10.77.0.5/32", {r.get("dst") for r in routes})
+        self.assertNotIn("10.77.0.5/32", {str(ip_network(r["dst"], strict=False)) for r in routes if r.get("dst") and r["dst"] != "default"})
         self.assertEqual(self.file.read_bytes(), self.initial_file)
         record = json.loads((self.state / "mesh-transaction.json").read_text())
         self.assertEqual(record["state"], "rolled_back")
