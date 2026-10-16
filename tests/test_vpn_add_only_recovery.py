@@ -72,3 +72,11 @@ def test_unrelated_routes_are_preserved_in_full():
     new[1]["metric"] = 60
     assert _unmanaged_routes(old, {"10.77.0.4/32"}) != _unmanaged_routes(
         new, {"10.77.0.4/32"})
+
+
+
+def test_default_route_drift_is_not_discarded_from_kernel_snapshot():
+    before = [{"dst": "default", "gateway": "192.0.2.1", "dev": "eth0"}]
+    after = [{"dst": "default", "gateway": "192.0.2.254", "dev": "eth0"}]
+    assert _unmanaged_routes(before, {"10.77.0.4/32"}) != _unmanaged_routes(
+        after, {"10.77.0.4/32"})
