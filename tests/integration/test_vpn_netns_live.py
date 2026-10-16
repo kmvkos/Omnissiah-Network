@@ -339,7 +339,7 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
         os.waitpid(pid, 0)
         self.fail("Worker timed out instead of hitting the injected kill point")
 
-    def _run_transaction_with_sigkill(self, boundary):
+    def _run_transaction_with_sigkill(self, boundary, *, operation_id=None):
         """Real coordinator + real commands; kill after a precise journaled step."""
         lockfile = self.state / "mesh-transaction.lock"
         lockfile.touch(mode=0o600)
@@ -364,7 +364,8 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
                         os.kill(os.getpid(), signal.SIGKILL)
                 self.backend.route_step = kill_route_step
             run_offline_mesh_transaction(
-                self.plan, self.desired["peers"], self.backend, self.state)
+                self.plan, self.desired["peers"], self.backend, self.state,
+                operation_id=operation_id)
 
         self._kill_forked_worker(work)
         return json.loads((self.state / "mesh-transaction.json").read_text())
@@ -404,6 +405,8 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
         """Actual process is killed after durable prepared journal, before WG sync."""
         import vpn_mesh_transaction
         from vpn_prepared_recovery import reconcile_prepared
+        from vpn_operation_fence import status
+        operation_id = str(uuid.uuid4())
         lock = self.state / "mesh-transaction.lock"
         lock.touch(mode=0o600)
         lock.chmod(0o600)
@@ -417,17 +420,36 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
                     os.kill(os.getpid(), signal.SIGKILL)
             vpn_mesh_transaction._journal = kill_after_prepared
             run_offline_mesh_transaction(
-                self.plan, self.desired["peers"], self.backend, self.state)
+                self.plan, self.desired["peers"], self.backend, self.state,
+                operation_id=operation_id)
 
         self._kill_forked_worker(work)
         saved = json.loads((self.state / "mesh-transaction.json").read_text())
         self.assertEqual((saved["state"], saved["phase"]), ("prepared", "none"))
         self.assertEqual(self._wg_keys(), {self.old_public})
         self.assertEqual(self._route_set(), {OLD_ROUTE})
+        self.assertEqual(status(self.state, operation_id)["state"], "reserved")
         self.assertEqual(reconcile_prepared(
             self.state, self.backend), {"state": "rolled_back", "changed": True})
+        self.assertEqual(status(self.state, operation_id)["state"], "rolled_back")
         self.assertEqual(self._wg_keys(), {self.old_public})
         self.assertEqual(self._route_set(), {OLD_ROUTE})
+        self.assertEqual(self.config.read_bytes(), self.before_config)
+
+    def test_sigkill_and_add_only_rollback_closes_operation_uuid(self):
+        """Recovery resolves durable admission only after original state verified."""
+        from vpn_add_only_recovery import reconcile_add_only
+        from vpn_operation_fence import status
+        operation_id = str(uuid.uuid4())
+        record = self._run_transaction_with_sigkill(
+            "after_route_write", operation_id=operation_id)
+        self.assertEqual(record["operation_id"], operation_id)
+        self.assertEqual(status(self.state, operation_id)["state"], "reserved")
+        self.assertEqual(reconcile_add_only(
+            self.state, self.backend, ["10.77.0.2"])["state"], "rolled_back")
+        self.assertEqual(status(self.state, operation_id)["state"], "rolled_back")
+        self.assertEqual(self._route_set(), {OLD_ROUTE})
+        self.assertEqual(self._wg_keys(), {self.old_public})
         self.assertEqual(self.config.read_bytes(), self.before_config)
 
     def test_sigkill_after_wg_sync_fails_closed_at_nonrecoverable_phase(self):
