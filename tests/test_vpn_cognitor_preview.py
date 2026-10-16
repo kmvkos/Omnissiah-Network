@@ -55,10 +55,10 @@ def test_exact_disk_and_kernel_peers_must_agree():
 
 def test_refuse_client_identity_or_address_collision():
     with pytest.raises(CognitorPreflightError, match="key already installed"):
-        preview_add(dict(PLAN, expected_name="magos03", public_key=A), current_peers=PEERS,
+        preview_add(dict(PLAN, public_key=A), expected_name="magos03", current_peers=PEERS,
                     routes=ROUTES, persisted_config=CONF)
     with pytest.raises(CognitorPreflightError, match="already belongs"):
-        preview_add(dict(PLAN, expected_name="magos03", client_address="10.77.0.3/32"),
+        preview_add(dict(PLAN, client_address="10.77.0.3/32"), expected_name="magos03",
                     current_peers=PEERS, routes=ROUTES, persisted_config=CONF)
 
 
@@ -94,5 +94,5 @@ def test_unmanaged_or_malformed_disk_blocks():
 def test_revision_changes_with_plan_and_live_snapshot():
     base = preview()["revision"]
     assert base != preview(routes=ROUTES + [{"dst": "172.16.0.0/16", "dev": "eth0"}])["revision"]
-    assert base != preview_add(dict(PLAN, expected_name="magos03", client_name="other"),
+    assert base != preview_add(dict(PLAN, client_name="other"), expected_name="magos03",
                 current_peers=PEERS, routes=ROUTES, persisted_config=CONF)["revision"]
