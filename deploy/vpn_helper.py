@@ -219,14 +219,36 @@ def main():
         # wg-quick strip removes Address/other wg-quick-only settings.
         stripped = run(["wg-quick", "strip", str(tmp)])
         if args.command == "apply":
+            from vpn_reconcile import parse_wg_dump, compare
             previous = run(["wg", "showconf", IFACE])
+            # Preserve current disk state as well; the interface and the
+            # persistent configuration must agree after an error.
+            previous_disk = stored_config.read_bytes()
             try:
                 run(["wg", "syncconf", IFACE, "/dev/stdin"], input=stripped)
-                tmp.replace(WG_DIR / "wg0.conf")
-            except Exception:
-                # Reconcile kernel peers back to the last observed configuration.
-                run(["wg", "syncconf", IFACE, "/dev/stdin"], input=previous)
-                raise
+                actual = parse_wg_dump(run(["wg", "show", IFACE, "dump"]))
+                checked = compare(data["peers"], actual)
+                if checked["state"] != "in_sync":
+                    raise HelperError("Post-sync peer verification did not match desired state")
+                tmp.replace(stored_config)
+            except Exception as exc:
+                try:
+                    # No route-set changes are allowed by this operation.
+                    run(["wg", "syncconf", IFACE, "/dev/stdin"], input=previous)
+                    if stored_config.read_bytes() != previous_disk:
+                        with tempfile.NamedTemporaryFile(
+                                dir=WG_DIR, mode="wb", prefix="wg-rollback-",
+                                suffix=".conf", delete=False) as backup:
+                            backup.write(previous_disk)
+                            backup_path = Path(backup.name)
+                        try:
+                            backup_path.chmod(0o600)
+                            backup_path.replace(stored_config)
+                        finally:
+                            backup_path.unlink(missing_ok=True)
+                except Exception as rollback_error:
+                    raise HelperError("Apply failed and local rollback failed; manual recovery required") from rollback_error
+                raise HelperError("Apply failed; previous live WireGuard state restored") from exc
         else:
             tmp.replace(WG_DIR / "wg0.conf")
     finally:
