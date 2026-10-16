@@ -29,12 +29,14 @@ behind the running three-node lab. This document does not authorize route mutati
 remove nodes and private /32 peer links using only Omnissiah web UI; operations
 are authenticated, auditable, idempotent, safe under retries/timeouts and
 recoverable after interruptions; management connectivity survives; WireGuard
-state persists after reboot and upgrades. A basic protected-subnet scenario is
-tested with explicit policies. The three-node end-to-end test and failure
-injection must pass on disposable Debian 13 VMs.
+state persists after reboot and upgrades. A **Cognitor client** can be provisioned
+under a selected Magos through the web UI, receive its own WireGuard configuration,
+connect, be revoked, and reach only explicitly approved destinations. A basic
+routed protected-LAN scenario behind Magos is tested with explicit policies.
+The three-node end-to-end test and failure injection must pass on disposable Debian 13 VMs.
 
 **Beyond v1.0**: complex multi-LAN policy routing, NAT traversal/orchestration,
-dynamic endpoint discovery, HA controller/relays, dedicated Cognitor clients,
+dynamic endpoint discovery, HA controller/relays, native Cognitor apps,
 large multi-tenant deployments and sophisticated ACL templates.
 
 ## P0 — Reliability and recovery (next)
@@ -80,6 +82,31 @@ no silent success, and no unauthorized route change.
 
 **Exit criteria:** add / remove / update a 4th Magos without manual editing;
  old peers stay connected; rollback restores the previous topology.
+
+## P1 — Cognitor client lifecycle (core feature)
+
+The original architecture defines Cognitor as an individual WireGuard client
+attached to a selected Magos, not another Magos node. This is distinct from
+ordinary LAN hosts behind a Magos, which do **not** need WireGuard themselves.
+
+- Admin selects a parent Magos and assigns a unique client VPN address.
+- Create client key material securely: private key should be generated on the
+  client when possible; otherwise issue a one-time encrypted configuration and
+  never display or log the private key again. Define key ownership explicitly.
+- Provision the Cognitor peer to **only its parent Magos**, using mTLS control,
+  restricted root RPC, preflight, journaled transaction and rollback.
+- Web UI shows Cognitor pending/active/revoked, last handshake, traffic counters,
+  and whether the parent Magos has acknowledged the intended peer config.
+- Deliver a client configuration for supported WireGuard platforms with explicit
+  AllowedIPs, endpoint, DNS and keepalive; never assume a default 0.0.0.0/0
+  route. Client-to-client and client-to-LAN access is policy controlled.
+- Disable/revoke/delete Cognitor safely and clean parent routes + peers.
+- Test two Cognitors behind different Magos, with permitted and denied traffic;
+  confirm a revoked Cognitor cannot reconnect.
+
+**Exit criteria:** two Cognitors managed entirely in the web UI can establish
+WireGuard handshakes via their respective Magos and exchange only allowed
+traffic, even while the three-Magos mesh remains healthy.
 
 ## P1 — Routing real protected subnets
 
@@ -160,7 +187,7 @@ with explicit route/ACL ownership, failure rollback and reboot persistence.
   policy templates and scale planning beyond N*(N-1)/2 full-mesh links.
 - Sophisticated policy routing/multiple interfaces, site-to-site public
   endpoints and NAT traversal.
-- Cognitor client onboarding/configuration, mobile/desktop clients.
+- Dedicated native Cognitor applications and large-scale client provisioning (basic WireGuard Cognitor provisioning is mandatory for v1.0).
 - HA control plane, distributed mesh rollout policy and fleet-scale queues.
 - IPv6 and dual-stack after separate routing/security model validation.
 
