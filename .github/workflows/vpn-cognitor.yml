@@ -4,7 +4,8 @@ on:
     paths:
       - 'src/nmc_api/cognitors.py'
       - 'deploy/vpn_cognitor_preview.py'
-      - 'deploy/vpn_cognitor_transaction.py'
+      - 'deploy/vpn_cognitor_transaction.py scripts/cognitor_debian_setup.py'
+      - 'scripts/cognitor_debian_setup.py'
       - 'deploy/vpn_rpc.py'
       - 'deploy/vpn_helper.py'
       - 'agents/app/vpn_client.py'
@@ -19,7 +20,8 @@ on:
       - 'tests/test_vpn_cognitor_blueprint.py'
       - 'tests/test_vpn_cognitor_validation.py'
       - 'tests/test_vpn_cognitor_preview.py'
-      - 'tests/test_vpn_cognitor_transaction.py'
+      - 'tests/test_vpn_cognitor_transaction.py tests/test_cognitor_debian_setup.py'
+      - 'tests/test_cognitor_debian_setup.py'
       - '.github/workflows/vpn-cognitor.yml'
   workflow_dispatch:
 jobs:
