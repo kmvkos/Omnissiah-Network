@@ -8,6 +8,7 @@ journal blocks further operations pending explicit manual recovery.
 """
 import copy
 import json
+from ipaddress import ip_network
 import os
 from pathlib import Path
 import subprocess
@@ -114,7 +115,7 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
 
     def _route_set(self):
         _, routes = self.backend.snapshot()
-        return {r["dst"] for r in routes if r.get("dev") == "wg0"}
+        return {str(ip_network(r["dst"], strict=False)) for r in routes if r.get("dev") == "wg0"}
 
     def _wg_keys(self):
         peers, _ = self.backend.snapshot()
