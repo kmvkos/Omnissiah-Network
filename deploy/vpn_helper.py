@@ -137,7 +137,7 @@ def verify_active_peers(data):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["identity", "validate", "prepare", "start", "apply", "status", "route-preview", "route-transaction", "transaction-status"])
+    parser.add_argument("command", choices=["identity", "validate", "prepare", "start", "apply", "status", "route-preview", "route-transaction", "transaction-status", "cognitor-preview"])
     parser.add_argument("--node-name", required=True)
     parser.add_argument("--plan", type=Path)
     parser.add_argument("--operation-id")
@@ -206,7 +206,30 @@ def main():
     st = candidate.stat()
     if not candidate.is_file() or st.st_uid != 0 or st.st_mode & 0o077:
         raise HelperError("Plan must be a root-owned 0600 file")
-    data = validate_plan(json.loads(candidate.read_text()), args.node_name)
+    raw_plan = json.loads(candidate.read_text())
+    if args.command == "cognitor-preview":
+        # Read-only admission check: no wg set, route writes or config changes.
+        from vpn_cognitor_preview import preview_add, validate_plan as validate_client_plan
+        import stat
+        validate_client_plan(raw_plan, args.node_name)
+        config_file = WG_DIR / "wg0.conf"
+        if (config_file.is_symlink() or not config_file.is_file()
+                or config_file.stat().st_uid != 0
+                or not stat.S_ISREG(config_file.stat().st_mode)
+                or config_file.stat().st_mode & 0o077):
+            raise HelperError("Unsafe WireGuard persisted configuration")
+        if subprocess.run(["wg", "show", IFACE], capture_output=True).returncode:
+            raise HelperError("WireGuard is not active")
+        from vpn_reconcile import parse_wg_dump
+        current = parse_wg_dump(run(["wg", "show", IFACE, "dump"]))
+        routes = json.loads(run(["ip", "-j", "-4", "route", "show", "table", "main"]))
+        protected = os.environ.get("OMNISSIAH_PROTECTED_MANAGEMENT_IPV4", "")
+        result = preview_add(raw_plan, current_peers=current, routes=routes,
+                             persisted_config=config_file.read_text(),
+                             protected_addresses=[entry.strip() for entry in protected.split(",") if entry.strip()])
+        print(json.dumps(result))
+        return
+    data = validate_plan(raw_plan, args.node_name)
     if args.command == "validate":
         print(json.dumps({"valid": True, "peers": len(data["peers"])}))
         return
