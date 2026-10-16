@@ -206,6 +206,70 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
             (self.state / "mesh-transaction.json").read_text())["state"], "prepared")
         self.assertEqual(self._wg_keys(), {self.old_public, self.new_public})
 
+    def _crash_route_stage(self, *, route_present):
+        """Reproduce real on-disk state before a write-ahead route step."""
+        from vpn_route_executor_sim import _durable_write
+        lock = self.state / "mesh-transaction.lock"
+        lock.touch(mode=0o600)
+        lock.chmod(0o600)
+        self.backend.stage_backup()
+        self.backend.sync_wireguard(self.desired["peers"])
+        self.assertEqual(self._wg_keys(), {self.old_public, self.new_public})
+        step = self.plan["steps"][0]
+        _durable_write(self.state, "mesh-transaction.json", {
+            "schema_version": 1, "state": "applying", "phase": "route",
+            "snapshot_sha256": self.plan["snapshot_sha256"],
+            "route_ops": 0,
+            "pending_route": step,
+            "recovery": {"desired_peers": self.desired["peers"]},
+        })
+        if route_present:
+            self.backend.route_step(step)
+
+    def test_partial_add_recovery_after_wg_sync_before_route_write(self):
+        """Remove only the new peer; keep original peer and route."""
+        from vpn_add_only_recovery import reconcile_add_only
+        self._crash_route_stage(route_present=False)
+        result = reconcile_add_only(self.state, self.backend, ["198.51.100.1"])
+        self.assertEqual(result, {"state": "rolled_back", "changed": True})
+        self.assertEqual(self._route_set(), {OLD_ROUTE})
+        self.assertEqual(self._wg_keys(), {self.old_public})
+        self.assertEqual(self.config.read_bytes(), self.before_config)
+        self.assertEqual(json.loads(
+            (self.state / "mesh-transaction.json").read_text())["state"], "rolled_back")
+
+    def test_partial_add_recovery_after_route_written_but_before_journal_update(self):
+        """Delete only the new /32 and peer after validating both."""
+        from vpn_add_only_recovery import reconcile_add_only
+        self._crash_route_stage(route_present=True)
+        self.assertEqual(self._route_set(), {OLD_ROUTE, NEW_ROUTE})
+        result = reconcile_add_only(self.state, self.backend, ["198.51.100.1"])
+        self.assertEqual(result["state"], "rolled_back")
+        self.assertEqual(self._route_set(), {OLD_ROUTE})
+        self.assertEqual(self._wg_keys(), {self.old_public})
+        self.assertEqual(self.config.read_bytes(), self.before_config)
+
+    def test_partial_add_recovery_rejects_foreign_peer_before_any_write(self):
+        """A different peer attached after crash must never be removed."""
+        from vpn_add_only_recovery import reconcile_add_only, AddOnlyRecoveryBlocked
+        self._crash_route_stage(route_present=True)
+        _, foreign = keypair()
+        command("ip", "netns", "exec", self.netns, "wg", "set", "wg0",
+                "peer", foreign, "allowed-ips", "10.77.0.99/32")
+        with self.assertRaisesRegex(AddOnlyRecoveryBlocked, "Kernel peer state differs"):
+            reconcile_add_only(self.state, self.backend, ["198.51.100.1"])
+        self.assertIn(foreign, self._wg_keys())
+        self.assertEqual(self._route_set(), {OLD_ROUTE, NEW_ROUTE})
+
+    def test_partial_add_recovery_rejects_foreign_route(self):
+        """Never roll back a route with a foreign interface or metadata."""
+        from vpn_add_only_recovery import reconcile_add_only, AddOnlyRecoveryBlocked
+        self._crash_route_stage(route_present=False)
+        command("ip", "-n", self.netns, "-4", "route", "add", NEW_ROUTE, "dev", "lo")
+        with self.assertRaisesRegex(AddOnlyRecoveryBlocked, "Foreign route"):
+            reconcile_add_only(self.state, self.backend, ["198.51.100.1"])
+        self.assertEqual(self._wg_keys(), {self.old_public, self.new_public})
+
     def test_sequential_real_peer_additions_preserve_existing_mesh(self):
         """Apply a third peer, then a fourth without disrupting previous routes."""
         first = run_offline_mesh_transaction(
