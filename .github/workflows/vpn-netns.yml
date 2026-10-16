@@ -1,0 +1,37 @@
+name: Isolated WireGuard network namespace integration
+
+on:
+  pull_request:
+    paths:
+      - 'deploy/vpn_linux_backend.py'
+      - 'deploy/vpn_mesh_transaction.py'
+      - 'deploy/vpn_route_tx.py'
+      - 'deploy/vpn_route_journal.py'
+      - 'deploy/vpn_linux_preflight.py'
+      - 'deploy/vpn_reconcile.py'
+      - 'deploy/vpn_helper.py'
+      - 'tests/integration/test_vpn_netns_live.py'
+      - '.github/workflows/vpn-netns.yml'
+  workflow_dispatch:
+
+jobs:
+  isolated-netns:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install WireGuard and network namespace dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iproute2 wireguard-tools
+      - name: Require working Linux WireGuard kernel support
+        run: |
+          set -eu
+          test "$(id -u)" -ne 0
+          sudo ip netns add omni-netns-probe
+          trap 'sudo ip netns del omni-netns-probe || true' EXIT
+          sudo ip -n omni-netns-probe link add wg0 type wireguard
+          sudo ip -n omni-netns-probe link delete wg0
+      - name: Run live tests ONLY inside per-test network namespaces
+        run: |
+          sudo python3 -m unittest discover -s tests/integration -p test_vpn_netns_live.py -v
