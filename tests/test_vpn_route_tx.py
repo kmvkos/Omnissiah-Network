@@ -80,3 +80,13 @@ def test_default_route_is_not_modified_or_treated_as_conflict():
     result = mod.plan_route_delta([peer("10.77.0.4/32")], [],
         [{"dst": "default", "gateway": "192.168.32.1", "dev": "eth0"}])
     assert result["add"] == ["10.77.0.4/32"]
+
+def test_route_preview_is_root_helper_read_only_command():
+    helper = (path.parent / "vpn_helper.py").read_text()
+    block = helper.split('if args.command == "route-preview":', 1)[1].split(
+        '    secret = STATE / "private.key"', 1)[0]
+    assert '["ip", "-j", "-4", "route", "show", "table", "main"]' in block
+    assert 'plan_route_delta(data["peers"], current_peers, routes)' in block
+    assert 'writes_performed": False' in block
+    assert '["ip", "route", "add"' not in block
+    assert '["ip", "route", "del"' not in block
