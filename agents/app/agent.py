@@ -20,9 +20,24 @@ with app.app_context():
     db.create_all()
 
 
+# Legacy write routes predate VPN v2's restricted, locally validated root helper.
+# In managed mode, never expose a second way to change host networking or code.
+_LEGACY_WRITE_PATHS = frozenset({
+    '/api/v1/install_dependencies',
+    '/api/traffic_log/clear',
+    '/api/add_peer',
+    '/api/magos/update_config',
+    '/api/update_config',
+    '/api/v1/config/apply',
+    '/api/v1/software/update',
+})
+
+
 @app.before_request
 def require_controller_identity():
     config = load_config()
+    if config.get('mtls_required') and request.path in _LEGACY_WRITE_PATHS:
+        return jsonify(error='Legacy mutation API disabled in managed mode'), 403
     if not config.get('mtls_required') or not request.path.startswith('/api/'):
         return None
     from proxy_identity import proxy_identity
