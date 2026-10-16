@@ -201,10 +201,10 @@ class AddOnlyBackend:
         current = self._file()
         if current == self.before["config"]:
             return
-        expected = self.before["config"].rstrip("\\n") + (
-            "\\n\\n# Cognitor: " + self.plan["client_name"] +
-            "\\n[Peer]\\nPublicKey = " + self.key +
-            "\\nAllowedIPs = " + self.target + "\\n")
+        expected = self.before["config"].rstrip("\n") + (
+            "\n\n# Cognitor: " + self.plan["client_name"] +
+            "\n[Peer]\nPublicKey = " + self.key +
+            "\nAllowedIPs = " + self.target + "\n")
         if current != expected:
             raise CognitorTransactionBlocked("Unexpected persisted change; manual recovery")
         _atomic_bytes(self.config, self.before["config"].encode())
