@@ -48,10 +48,18 @@ def inspect_transaction(directory):
     if info.st_uid != os.geteuid() or info.st_mode & 0o077:
         return _bad("unsafe_state_directory")
     lock_path = folder / "mesh-transaction.lock"
+    journal = folder / "mesh-transaction.json"
+    if journal.is_symlink():
+        return _bad("unsafe_journal")
     if lock_path.is_symlink():
         return _bad("unsafe_lock_file")
+    if not lock_path.exists():
+        if journal.exists():
+            return _bad("missing_lock_file")
+        return {"state": "idle", "phase": "none", "route_ops": 0,
+                "needs_attention": False, "backup_verified": False, "reason": None}
     try:
-        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        fd = os.open(lock_path, os.O_RDONLY | os.O_NOFOLLOW)
         with os.fdopen(fd, "a+") as lock:
             meta = os.fstat(lock.fileno())
             if not stat.S_ISREG(meta.st_mode) or meta.st_uid != os.geteuid() or meta.st_mode & 0o077:
