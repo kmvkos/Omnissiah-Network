@@ -25,6 +25,7 @@ sys.path.insert(0, str(ROOT / "deploy"))
 from vpn_helper import render
 from vpn_linux_backend import IsolatedLinuxMeshBackend
 from vpn_mesh_transaction import MeshTransactionBlocked, run_offline_mesh_transaction
+from vpn_route_executor_sim import TransactionBlocked
 
 WG0_ADDRESS = "10.77.0.2/32"
 OLD_ROUTE = "10.77.0.3/32"
@@ -548,7 +549,7 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
             extended, delta, state_dir=self.state,
             config_path=self.config, runner=self._runner,
             allow_mutations=True)
-        with self.assertRaisesRegex(MeshTransactionBlocked, "already used"):
+        with self.assertRaisesRegex(TransactionBlocked, "already used"):
             run_offline_mesh_transaction(
                 delta, extended["peers"], next_backend, self.state,
                 operation_id=first_id)
@@ -588,7 +589,7 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
         self.assertEqual(inspect_transaction(self.state)["reason"], "orphan_operation")
         self.assertEqual(self._route_set(), {OLD_ROUTE})
         self.assertEqual(self._wg_keys(), {self.old_public})
-        with self.assertRaisesRegex(MeshTransactionBlocked, "outcome unknown"):
+        with self.assertRaisesRegex(TransactionBlocked, "outcome unknown"):
             run_offline_mesh_transaction(
                 self.plan, self.desired["peers"], self.backend, self.state,
                 operation_id=next_id)
