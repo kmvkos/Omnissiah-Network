@@ -3,13 +3,21 @@ on:
   pull_request:
     paths:
       - 'src/nmc_api/cognitors.py'
+      - 'deploy/vpn_cognitor_preview.py'
+      - 'deploy/vpn_rpc.py'
+      - 'deploy/vpn_helper.py'
+      - 'agents/app/vpn_client.py'
+      - 'agents/app/agent.py'
+      - 'ansible/roles/services/tasks/main.yml'
       - 'src/nmc_api/__init__.py'
       - 'src/vpn_cognitor_models.py'
-      - 'src/vpn_cognitor_validation.py'
+      - 'src/vpn_cognitor_validation.py deploy/vpn_cognitor_preview.py'
       - 'templates/vpn_cognitors.html'
+      - 'templates/vpn_cognitor_preview.html'
       - 'templates/vpn_overview.html'
       - 'tests/test_vpn_cognitor_blueprint.py'
-      - 'tests/test_vpn_cognitor_validation.py'
+      - 'tests/test_vpn_cognitor_validation.py tests/test_vpn_cognitor_preview.py'
+      - 'tests/test_vpn_cognitor_preview.py'
       - '.github/workflows/vpn-cognitor.yml'
   workflow_dispatch:
 jobs:
