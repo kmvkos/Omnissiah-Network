@@ -39,13 +39,15 @@
         <h5 class="mb-1">Desired / Actual</h5>
         <p class="text-muted small mb-0">Сверка фактического WireGuard с конфигурацией контроллера. Только чтение, без применения или перезапуска.</p>
       </div>
-      <button id="vpnReconcileBtn" type="button" class="btn btn-outline-modern" onclick="checkVpnDrift()">Сверить состояние</button>
+      <div class="d-flex gap-2">
+        <button id="vpnReconcileBtn" type="button" class="btn btn-outline-modern" onclick="checkVpnDrift()">Сверить состояние</button>
+      </div>
     </div>
     <div id="vpnReconcileState" role="status" class="text-muted small mb-3">Нажмите «Сверить состояние», чтобы опросить Magos по mTLS.</div>
     <div class="table-responsive">
       <table class="table table-dark premium-table">
-        <thead><tr><th>Magos</th><th>Desired peers</th><th>Actual peers</th><th>Сверка</th><th>Причина</th></tr></thead>
-        <tbody id="vpnReconcileRows"><tr><td colspan="5" class="text-muted text-center">Опрос ещё не выполнялся</td></tr></tbody>
+        <thead><tr><th>Magos</th><th>Desired peers</th><th>Actual peers</th><th>Сверка</th><th>Причина</th><th>Безопасное применение</th></tr></thead>
+        <tbody id="vpnReconcileRows"><tr><td colspan="6" class="text-muted text-center">Опрос ещё не выполнялся</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -69,6 +71,28 @@
 {% endblock %}
 {% block scripts %}
 <script>
+async function applySafePeerUpdate(nodeId, button) {
+  if (!confirm('Применить только безопасные изменения существующих пиров? Новые пиры и маршруты будут отклонены.')) return;
+  const status = document.getElementById('vpnReconcileState');
+  button.disabled = true;
+  status.textContent = 'Проверка и безопасное применение...';
+  try {
+    const response = await fetch('{{ url_for("safe_apply_vpn_node") }}', {
+      method: 'POST', credentials: 'same-origin',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({node_id: nodeId, ack: 'APPLY_SAFE_PEER_UPDATE'})
+    });
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) throw Error('HTTP ' + response.status + ': сервер вернул не JSON');
+    const result = await response.json();
+    if (!response.ok) throw Error(result.error + (result.preflight ? ' (' + result.preflight.reason + ')' : ''));
+    status.textContent = 'Результат: ' + result.result + '. Повторите сверку состояния.';
+  } catch (error) {
+    status.textContent = 'Применение отклонено: ' + error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
 async function checkVpnDrift() {
   const btn = document.getElementById('vpnReconcileBtn');
   const info = document.getElementById('vpnReconcileState');
@@ -105,6 +129,15 @@ async function checkVpnDrift() {
         }
         row.appendChild(cell);
       }
+      const action = document.createElement('td');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn btn-sm btn-outline-modern';
+      button.textContent = 'Apply (без изменения маршрутов)';
+      button.title = 'Только обновление параметров существующих пиров. Добавление / удаление пиров запрещено.';
+      button.onclick = () => applySafePeerUpdate(item.node_id, button);
+      action.appendChild(button);
+      row.appendChild(action);
       rows.appendChild(row);
     }
     info.textContent = 'Сверка выполнена. Никакие настройки узлов не менялись.';
