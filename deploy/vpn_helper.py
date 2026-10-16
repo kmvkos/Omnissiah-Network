@@ -142,7 +142,12 @@ def main():
                         handshakes[fields[0]] = int(fields[1])
                     except ValueError:
                         pass
-        print(json.dumps({"interface": IFACE, "active": exists, "handshakes": handshakes}))
+        peers = None
+        if exists:
+            from vpn_reconcile import parse_wg_dump
+            peers = parse_wg_dump(run(["wg", "show", IFACE, "dump"]))
+        print(json.dumps({"interface": IFACE, "active": exists,
+                          "handshakes": handshakes, "peers": peers}))
         return
     if args.command == "start":
         config_file = WG_DIR / "wg0.conf"
