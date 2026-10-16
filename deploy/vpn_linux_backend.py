@@ -59,7 +59,7 @@ class IsolatedLinuxMeshBackend:
 
     def __init__(self, node_plan, preview, *, state_dir="/var/lib/omnissiah-network/vpn",
                  config_path="/etc/wireguard/wg0.conf", runner=subprocess.run,
-                 allow_mutations=False):
+                 allow_mutations=False, protected_addresses=()):
         self._name = node_plan.get("node_name")
         self._plan = validate_plan(node_plan, self._name)
         self._preview = preview
@@ -69,6 +69,11 @@ class IsolatedLinuxMeshBackend:
         self._enabled = allow_mutations
         self._backup = self._state / "mesh-backup.json"
         self._original = None
+        from ipaddress import IPv4Address
+        self._protected_addresses = tuple(sorted({
+            str(IPv4Address(address)) for address in protected_addresses
+        }))
+        self._protected_routes_before = None
         if preview.get("iface") != "wg0" or preview.get("executable") is not False:
             raise TransactionBlocked("Only inert wg0 preview supported")
 
@@ -92,6 +97,38 @@ class IsolatedLinuxMeshBackend:
     def snapshot(self):
         # Use one runner to keep all observations mockable.
         return LinuxReadOnlyPreflight(self._runner).snapshot()
+
+    def _protected_routes(self):
+        """Observe effective IPv4 routing including ip rules; never trust only main."""
+        if not self._protected_addresses:
+            return {}
+        observed = {}
+        for address in self._protected_addresses:
+            raw = self._command(["ip", "-j", "-4", "route", "get", address])
+            try:
+                rows = json.loads(raw)
+            except (ValueError, TypeError) as exc:
+                raise TransactionBlocked("Cannot parse protected route") from exc
+            if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
+                raise TransactionBlocked("Protected route observation incomplete")
+            route = rows[0]
+            if not route.get("dev") or route.get("dev") == "wg0":
+                raise TransactionBlocked("Management or endpoint route traverses wg0")
+            observed[address] = {
+                "dev": route.get("dev"),
+                "gateway": route.get("gateway"),
+                "src": route.get("prefsrc") or route.get("src"),
+                "table": route.get("table"),
+            }
+        return observed
+
+    def _verify_protected_routes(self):
+        if self._protected_routes_before is None:
+            if self._protected_addresses:
+                raise TransactionBlocked("Missing protected route baseline")
+            return
+        if self._protected_routes() != self._protected_routes_before:
+            raise TransactionBlocked("Management or endpoint routing changed during VPN apply")
 
     def _config_bytes(self):
         if self._config.is_symlink() or not self._config.is_file():
@@ -150,6 +187,7 @@ class IsolatedLinuxMeshBackend:
                 os.fsync(directory_fd)
             finally:
                 os.close(directory_fd)
+        self._protected_routes_before = self._protected_routes()
         old_file = self._config_bytes().decode()
         previous_wg = self._command(["wg", "showconf", "wg0"])
         peers, routes = self.snapshot()
@@ -197,6 +235,7 @@ class IsolatedLinuxMeshBackend:
         self._command(argv)
 
     def verify(self, desired, preview):
+        self._verify_protected_routes()
         if preview != self._preview or desired != self._plan["peers"]:
             raise TransactionBlocked("Unexpected verification target")
         peers, routes = self.snapshot()
@@ -255,6 +294,7 @@ class IsolatedLinuxMeshBackend:
         _atomic_bytes(self._config, old["config"].encode())
 
     def verify_restored(self):
+        self._verify_protected_routes()
         old = self._load_backup()
         from vpn_route_journal import assert_snapshot_unchanged
         peers, routes = self.snapshot()
