@@ -39,7 +39,9 @@ def _identity(peer, *, desired=False):
     endpoint = peer.get("endpoint")
     try:
         host, port = endpoint.rsplit(":", 1)
-        IPv4Address(host)
+        address = IPv4Address(host)
+        if address.is_unspecified or address.is_multicast:
+            raise ValueError("Invalid endpoint address")
         if not (1 <= int(port) <= 65535):
             raise ValueError("Invalid endpoint port")
     except (AttributeError, TypeError, ValueError) as exc:
@@ -88,10 +90,14 @@ def _unmanaged_routes(routes, add_destinations):
 
 
 def _validate_new_routes(routes, add_destinations):
+    seen = set()
     for row in routes:
         route = normalize_route(row)
         if route is None or route["dst"] not in add_destinations:
             continue
+        if route["dst"] in seen:
+            raise AddOnlyRecoveryBlocked("Ambiguous duplicate added route")
+        seen.add(route["dst"])
         if (route["dev"] != "wg0" or route["gateway"]
                 or route["metric"] not in (None, 0)
                 or route["table"] not in ("main", 254)
@@ -133,6 +139,8 @@ def reconcile_add_only(folder, backend, management_addresses):
     subset of the original add-only operation.
     """
     folder = Path(folder)
+    if getattr(backend, "_state", None) != folder:
+        raise AddOnlyRecoveryBlocked("Backend state directory does not match journal")
     if folder.is_symlink() or not folder.is_dir():
         raise AddOnlyRecoveryBlocked("Unsafe recovery directory")
     info = folder.stat()
