@@ -14,13 +14,30 @@ spec.loader.exec_module(probe)
 
 
 class Result:
-    returncode = 0
-    def __init__(self, stdout):
+    def __init__(self, stdout, returncode=0):
         self.stdout = stdout
+        self.returncode = returncode
+
+
+@pytest.fixture(autouse=True)
+def managed_config(tmp_path, monkeypatch):
+    a = base64.b64encode(b"a" * 32).decode()
+    b = base64.b64encode(b"b" * 32).decode()
+    path = tmp_path / "wg0.conf"
+    path.write_text(
+        "# Managed by Omnissiah VPN v2\n"
+        "[Interface]\nPrivateKey = SIMULATED-SECRET-NEVER-PRINT\n"
+        "Address = 10.77.0.2/32\n"
+        "\n[Peer]\nPublicKey = " + a + "\nAllowedIPs = 10.77.0.3/32\n"
+        "\n[Peer]\nPublicKey = " + b + "\nAllowedIPs = 10.77.0.4/32\n"
+    )
+    path.chmod(0o600)
+    monkeypatch.setattr(probe, "CONFIG_PATH", path)
+    return path
 
 
 def observations(*, management="ens33", routes=True, timestamp=1000,
-                 extra=False, boot_enabled="enabled"):
+                 extra=False, boot_enabled="enabled", boot_state="active"):
     a = base64.b64encode(b"a" * 32).decode()
     b = base64.b64encode(b"b" * 32).decode()
     data = {
@@ -37,12 +54,13 @@ def observations(*, management="ens33", routes=True, timestamp=1000,
             [{"dst": "192.168.32.167", "dev": management,
               "prefsrc": "192.168.32.168"}]),
         ("systemctl", "is-enabled", "wg-quick@wg0.service"): boot_enabled,
-        ("systemctl", "is-active", "wg-quick@wg0.service"): "active",
+        ("systemctl", "is-active", "wg-quick@wg0.service"): boot_state,
     }
 
     def runner(argv, **kwargs):
         assert kwargs["check"] is False and kwargs["timeout"] == 10
-        return Result(data[tuple(argv)])
+        rc = 3 if tuple(argv) == ("systemctl", "is-active", "wg-quick@wg0.service") and boot_state != "active" else 0
+        return Result(data[tuple(argv)], returncode=rc)
     return runner, (a, b)
 
 
@@ -87,7 +105,7 @@ def test_reboot_refuses_unexpected_vpn_route():
 
 def test_boot_persistence_and_handshake_must_be_current():
     runner, _ = observations(boot_enabled="disabled")
-    with pytest.raises(probe.ProbeError, match="wg_quick_not_enabled_or_active"):
+    with pytest.raises(probe.ProbeError, match="wg_quick_not_enabled"):
         probe.snapshot("192.168.32.167", runner=runner, now=1050)
     runner, _ = observations(timestamp=1)
     data = probe.snapshot("192.168.32.167", runner=runner, now=1050)
@@ -134,3 +152,55 @@ def test_read_only_commands_never_use_network_writes():
     for unsafe in ('"wg-quick", "up"', '"wg-quick", "down"',
                    '"ip", "-4", "route", "add"', '"systemctl", "restart"'):
         assert unsafe not in script
+
+
+def test_manual_wg_quick_baseline_inactive_service_is_accepted():
+    runner, _ = observations(boot_state="inactive")
+    baseline = probe.snapshot("192.168.32.167", runner=runner, now=1050)
+    assert baseline["boot_active"] is False
+    assert baseline["boot_enabled"] is True
+    after_runner, _ = observations(boot_state="active")
+    after = probe.snapshot("192.168.32.167", runner=after_runner,
+                           now=1050, require_active=True)
+    assert after["boot_active"] is True
+    assert probe.verify(baseline, after) == []
+
+
+def test_post_reboot_inactive_systemd_fails_even_when_wg_interface_exists():
+    runner, _ = observations(boot_state="inactive")
+    before = probe.snapshot("192.168.32.167", runner=runner, now=1050)
+    with pytest.raises(probe.ProbeError, match="wg_quick_not_active_after_reboot"):
+        probe.snapshot("192.168.32.167", runner=runner,
+                       now=1050, require_active=True)
+    assert "wg_quick_not_active_after_reboot" in probe.verify(before, before)
+
+
+def test_failed_systemd_unit_never_counts_as_healthy_baseline():
+    runner, _ = observations(boot_state="failed")
+    with pytest.raises(probe.ProbeError, match="wg_quick_unhealthy_service"):
+        probe.snapshot("192.168.32.167", runner=runner, now=1050)
+
+
+def test_disk_peer_drift_is_refused_before_reboot(managed_config):
+    runner, _ = observations(boot_state="inactive")
+    conf = managed_config.read_text().replace("10.77.0.4/32", "10.77.0.99/32")
+    managed_config.write_text(conf)
+    with pytest.raises(probe.ProbeError, match="persisted_peers_differ_from_kernel"):
+        probe.snapshot("192.168.32.167", runner=runner, now=1050)
+
+
+def test_missing_or_symlinked_persisted_config_fails_closed(managed_config, tmp_path):
+    runner, _ = observations()
+    linked = tmp_path / "wg-linked.conf"
+    linked.symlink_to(managed_config)
+    with pytest.raises(probe.ProbeError, match="missing_or_unsafe_persisted_config"):
+        probe.snapshot("192.168.32.167", runner=runner, now=1050, config_path=linked)
+    managed_config.unlink()
+    with pytest.raises(probe.ProbeError, match="missing_or_unsafe_persisted_config"):
+        probe.snapshot("192.168.32.167", runner=runner, now=1050)
+
+
+def test_private_key_never_appears_in_baseline(managed_config):
+    runner, _ = observations()
+    state = probe.snapshot("192.168.32.167", runner=runner, now=1050)
+    assert "SIMULATED-SECRET-NEVER-PRINT" not in json.dumps(state)
