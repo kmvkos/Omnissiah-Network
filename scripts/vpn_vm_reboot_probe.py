@@ -27,9 +27,12 @@ class ProbeError(RuntimeError):
     pass
 
 
-def _run(argv, *, runner=subprocess.run):
+CONFIG_PATH = Path("/etc/wireguard/wg0.conf")
+
+
+def _run(argv, *, runner=subprocess.run, allowed_codes=(0,)):
     result = runner(argv, capture_output=True, text=True, check=False, timeout=10)
-    if result.returncode:
+    if result.returncode not in allowed_codes:
         raise ProbeError("observation_failed:" + argv[0])
     return result.stdout.strip()
 
@@ -93,7 +96,80 @@ def _peer_inventory(runner):
     return sorted(ids), ips, handshakes
 
 
-def snapshot(controller_ip, *, runner=subprocess.run, now=None):
+def _persisted_peer_inventory(config_path):
+    """Inspect the managed on-disk config without displaying PrivateKey values.
+
+    Inactive one-shot systemd state is safe for the *baseline* only if the
+    on-disk configuration has the same peer identities and host routes as
+    the currently running kernel. After reboot, systemd must be active.
+    """
+    path = Path(config_path)
+    if path.is_symlink() or not path.is_file():
+        raise ProbeError("missing_or_unsafe_persisted_config")
+    info = path.stat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+        raise ProbeError("unsafe_persisted_config_permissions")
+    try:
+        lines = path.read_text().splitlines()
+    except (UnicodeError, OSError) as exc:
+        raise ProbeError("persisted_config_unreadable") from exc
+    if not lines or lines[0] != "# Managed by Omnissiah VPN v2":
+        raise ProbeError("unmanaged_persisted_config")
+    section = None
+    has_interface = False
+    peers = {}
+    current = None
+
+    def complete_peer():
+        if current is None:
+            return
+        key = current.get("PublicKey")
+        cidr = current.get("AllowedIPs")
+        if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9+/]{43}=", key):
+            raise ProbeError("invalid_persisted_peer")
+        try:
+            network = ip_network(cidr, strict=True)
+        except (ValueError, TypeError) as exc:
+            raise ProbeError("invalid_persisted_peer_route") from exc
+        if network.version != 4 or network.prefixlen != 32:
+            raise ProbeError("unexpected_persisted_peer_route")
+        digest = _fingerprint(key)
+        if digest in peers:
+            raise ProbeError("duplicate_persisted_peer")
+        peers[digest] = str(network)
+
+    for raw in lines[1:]:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            complete_peer()
+            current = None
+            section = line
+            if section == "[Interface]":
+                has_interface = True
+            elif section == "[Peer]":
+                if not has_interface:
+                    raise ProbeError("invalid_persisted_config_structure")
+                current = {}
+            else:
+                raise ProbeError("unsupported_persisted_config_section")
+            continue
+        if "=" not in line or section is None:
+            raise ProbeError("invalid_persisted_config_structure")
+        k, v = (part.strip() for part in line.split("=", 1))
+        if section == "[Peer]" and k in ("PublicKey", "AllowedIPs"):
+            if k in current:
+                raise ProbeError("duplicate_persisted_peer_field")
+            current[k] = v
+    complete_peer()
+    if not has_interface or not peers:
+        raise ProbeError("persisted_config_incomplete")
+    return peers
+
+
+def snapshot(controller_ip, *, runner=subprocess.run, now=None,
+             require_active=False, config_path=None):
     try:
         address = str(IPv4Address(controller_ip))
     except ValueError as exc:
@@ -101,6 +177,9 @@ def snapshot(controller_ip, *, runner=subprocess.run, now=None):
     if address == "0.0.0.0":
         raise ProbeError("invalid_controller_ip")
     ids, allowed, handshakes = _peer_inventory(runner)
+    persisted = _persisted_peer_inventory(CONFIG_PATH if config_path is None else config_path)
+    if persisted != allowed:
+        raise ProbeError("persisted_peers_differ_from_kernel")
     try:
         main_routes = json.loads(_run(
             ["ip", "-j", "-4", "route", "show", "table", "main"], runner=runner))
@@ -132,9 +211,16 @@ def snapshot(controller_ip, *, runner=subprocess.run, now=None):
     if len(actual) != len(targets) or set(actual) != targets:
         raise ProbeError("missing_or_duplicate_wg0_route")
     enabled = _run(["systemctl", "is-enabled", "wg-quick@wg0.service"], runner=runner)
-    active = _run(["systemctl", "is-active", "wg-quick@wg0.service"], runner=runner)
-    if enabled != "enabled" or active != "active":
-        raise ProbeError("wg_quick_not_enabled_or_active")
+    # is-active returns status 3 for inactive oneshot services even when a
+    # manually started wg0 is healthy. Never reject baseline just for that.
+    service = _run(["systemctl", "is-active", "wg-quick@wg0.service"],
+                   runner=runner, allowed_codes=(0, 3))
+    if enabled != "enabled":
+        raise ProbeError("wg_quick_not_enabled")
+    if service not in ("active", "inactive"):
+        raise ProbeError("wg_quick_unhealthy_service")
+    if require_active and service != "active":
+        raise ProbeError("wg_quick_not_active_after_reboot")
     now = time.time() if now is None else now
     max_age = 180
     fresh = all(ts > 0 and 0 <= now - ts <= max_age for ts in handshakes.values())
@@ -146,7 +232,7 @@ def snapshot(controller_ip, *, runner=subprocess.run, now=None):
         "management": {k: management.get(k) for k in
                        ("dev", "gateway", "prefsrc", "src", "table")},
         "boot_enabled": True,
-        "boot_active": True,
+        "boot_active": service == "active",
         "handshakes_fresh": fresh,
     }
 
@@ -155,8 +241,13 @@ def verify(before, after):
     if not isinstance(before, dict) or before.get("schema_version") != 1:
         raise ProbeError("invalid_baseline")
     fields = ("peer_fingerprints", "peer_allowed_ips", "wg0_routes",
-              "management", "boot_enabled", "boot_active")
+              "management", "boot_enabled")
     problems = [key for key in fields if before.get(key) != after.get(key)]
+    # Unlike the baseline, the systemd service MUST be active after reboot.
+    # Comparing the preboot state would report false drift when the node was
+    # originally started via wg-quick up and systemctl enable.
+    if after.get("boot_active") is not True:
+        problems.append("wg_quick_not_active_after_reboot")
     if not before.get("handshakes_fresh"):
         problems.append("baseline_handshakes")
     if not after.get("handshakes_fresh"):
@@ -236,7 +327,7 @@ def main(argv=None):
         deadline = time.monotonic() + args.wait
         while True:
             try:
-                current = snapshot(args.controller_ip)
+                current = snapshot(args.controller_ip, require_active=True)
                 failures = verify(before, current)
             except ProbeError as exc:
                 failures = [str(exc)]
