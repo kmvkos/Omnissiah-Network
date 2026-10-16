@@ -3117,7 +3117,24 @@ def vpn_mesh_operation():
                               for peer in selected["peers"]]}
             if not plan["peers"]:
                 return jsonify(error="No explicit Magos links configured"), 409
+        if action == "apply":
+            # Recheck eligibility immediately before the privileged write.
+            from vpn_change_preview import preview as preview_change
+            from vpn_reconcile import compare
+            observed_before = _vpn_v2_send(node, "status")
+            decision = preview_change(plan["peers"], observed_before.get("peers"),
+                                      active=observed_before.get("active") is True)
+            if decision["decision"] != "eligible":
+                return jsonify(error="Apply refused by live preflight", preflight=decision), 409
         result = _vpn_v2_send(node, action, plan)
+        if action == "apply":
+            from vpn_reconcile import compare
+            observed_after = _vpn_v2_send(node, "status")
+            verification = compare(plan["peers"], observed_after.get("peers"))
+            if verification["state"] != "in_sync":
+                app.logger.error("VPN apply verification mismatch for %s", node.name)
+                return jsonify(error="Apply returned but postflight is not in sync; manual investigation required",
+                               verification=verification["state"]), 502
         if action == "identity":
             new_key = result.get("public_key")
             if not isinstance(new_key, str):
