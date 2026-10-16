@@ -30,7 +30,6 @@ class LinuxReadOnlyPreflight:
 
     def snapshot(self):
         # Fail closed if WG is absent. Never interpret absence as empty peers.
-        self._read(["wg", "show", "wg0", "dump"])
         wg = self._read(["wg", "show", "wg0", "dump"])
         peers = parse_wg_dump(wg)
         try:
