@@ -117,6 +117,23 @@ def render(data, private_key):
     return "\n".join(lines) + "\n"
 
 
+def verify_active_peers(data):
+    """Verify actual kernel peer routing and keepalive before persisting config."""
+    from vpn_reconcile import parse_wg_dump
+    peers = parse_wg_dump(run(["wg", "show", IFACE, "dump"]))
+    expected = {peer["public_key"]: peer for peer in data["peers"]}
+    actual = {peer["public_key"]: peer for peer in peers}
+    if set(expected) != set(actual):
+        raise HelperError("Kernel peer list does not match desired plan")
+    for key, peer in expected.items():
+        observed = actual[key]
+        if sorted(peer["allowed_ips"]) != sorted(observed["allowed_ips"]):
+            raise HelperError("Kernel AllowedIPs differ from desired plan")
+        if int(peer["keepalive"]) != int(observed["keepalive"]):
+            raise HelperError("Kernel persistent keepalive differs from desired plan")
+    return len(actual)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=["identity", "validate", "prepare", "start", "apply", "status"])
@@ -191,6 +208,12 @@ def main():
             raise HelperError("Refusing to overwrite a configuration not owned by VPN v2")
     active = subprocess.run(["wg", "show", IFACE], capture_output=True).returncode == 0
     if args.command == "apply":
+        # The persisted file must represent the exact currently running route
+        # set; otherwise this node has untracked drift and writes are unsafe.
+        from vpn_reconcile import parse_wg_dump
+        kernel_peers = parse_wg_dump(run(["wg", "show", IFACE, "dump"])) if active else []
+        running_routes = sorted(route for peer in kernel_peers
+                                for route in peer["allowed_ips"])
         # wg syncconf updates peers but does NOT manage Linux routes.
         # Refuse an active topology change until route reconciliation exists.
         def peer_routes(text):
@@ -203,6 +226,8 @@ def main():
         desired_routes = sorted(
             route for peer in data["peers"] for route in peer["allowed_ips"]
         )
+        if current_routes != running_routes:
+            raise HelperError("Kernel and persisted route sets differ; refusing untracked drift")
         if current_routes != desired_routes:
             raise HelperError("Live route-set changes are not supported; use a controlled maintenance procedure")
     if args.command == "apply" and not active:
@@ -220,13 +245,18 @@ def main():
         stripped = run(["wg-quick", "strip", str(tmp)])
         if args.command == "apply":
             previous = run(["wg", "showconf", IFACE])
+            # Only replace the persisted config after the kernel agrees.
+            # Failure to replace on disk also triggers an in-kernel rollback.
             try:
                 run(["wg", "syncconf", IFACE, "/dev/stdin"], input=stripped)
+                verify_active_peers(data)
                 tmp.replace(WG_DIR / "wg0.conf")
-            except Exception:
-                # Reconcile kernel peers back to the last observed configuration.
-                run(["wg", "syncconf", IFACE, "/dev/stdin"], input=previous)
-                raise
+            except Exception as original:
+                try:
+                    run(["wg", "syncconf", IFACE, "/dev/stdin"], input=previous)
+                except Exception as rollback_error:
+                    raise HelperError("Apply failed and live rollback FAILED; inspect local journal immediately") from rollback_error
+                raise HelperError("Apply failed; previous live WireGuard state restored") from original
         else:
             tmp.replace(WG_DIR / "wg0.conf")
     finally:
