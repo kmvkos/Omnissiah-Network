@@ -10,20 +10,38 @@
     <a href="{{ url_for('dashboard') }}" class="btn btn-outline-modern">Дашборд</a>
   </div>
   <div class="premium-card p-4 mb-4">
-    <h5 class="mb-3">Фактическое состояние узлов</h5>
-    <p class="text-muted small">Наблюдение по аутентифицированному heartbeat, интервал обновления около 30 секунд. VPN-интерфейс и доступность пира — разные проверки.</p>
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <div><h5 class="mb-1">Обзор VPN-сети</h5>
+      <p class="text-muted small mb-0">Omnissiah управляет сетью по mTLS. Трафик WireGuard передают Magos напрямую.</p></div>
+      <span class="badge bg-secondary">Наблюдение без изменений VPN</span>
+    </div>
+    <div class="row g-3 mt-1">
+      <div class="col-12 col-md-4"><div class="rounded border p-3 h-100"><div class="text-muted small">Всего Magos</div><div class="fs-3 fw-bold">{{ nodes | length }}</div></div></div>
+      <div class="col-12 col-md-4"><div class="rounded border p-3 h-100"><div class="text-muted small">Управление на связи</div><div class="fs-3 fw-bold">{{ nodes | selectattr('status.service_active') | list | length }} / {{ nodes | length }}</div></div></div>
+      <div class="col-12 col-md-4"><div class="rounded border p-3 h-100"><div class="text-muted small">Недавнее рукопожатие</div><div class="fs-3 fw-bold">{{ nodes | selectattr('status.vpn_connected') | list | length }} / {{ nodes | length }}</div></div></div>
+    </div>
+    <nav class="mt-3 d-flex flex-wrap gap-2" aria-label="Порядок проверки VPN">
+      <a class="btn btn-sm btn-outline-modern" href="#vpn-health">Состояние узлов</a>
+      <a class="btn btn-sm btn-outline-modern" href="#vpn-compare">Сверка</a>
+      <a class="btn btn-sm btn-outline-modern" href="#vpn-plan">Изменения</a>
+      <a class="btn btn-sm btn-outline-modern" href="#vpn-journal">Журнал</a>
+    </nav>
+  </div>
+  <div id="vpn-health" class="premium-card p-4 mb-4">
+    <h5 class="mb-3">1. Состояние узлов</h5>
+    <p class="text-muted small">Информация по последнему heartbeat (около 30 секунд). Запущенный интерфейс ещё не гарантирует доступность всех ресурсов; рукопожатие подтверждает связь с пиром.</p>
     <div class="table-responsive">
       <table class="table table-dark premium-table">
-        <thead><tr><th>Узел</th><th>VPN IP</th><th>Управление</th><th>mTLS</th><th>WireGuard</th><th>Peer handshake</th><th>Действия</th></tr></thead>
+        <thead><tr><th>Узел</th><th>VPN-адрес</th><th>Связь с контроллером</th><th>mTLS-сертификат</th><th>VPN-интерфейс</th><th>Рукопожатие WG</th><th>Действия</th></tr></thead>
         <tbody>
         {% for item in nodes %}
           <tr>
             <td><strong>{{ item.node.name }}</strong></td>
             <td><code>{{ item.node.ip_pool or '-' }}</code></td>
-            <td><span class="badge bg-{{ 'success' if item.status.service_active else 'secondary' }}">{{ 'Online' if item.status.service_active else 'Нет heartbeat' }}</span></td>
+            <td><span class="badge bg-{{ 'success' if item.status.service_active else 'secondary' }}">{{ 'На связи' if item.status.service_active else 'Нет связи' }}</span></td>
             <td><span class="badge bg-{{ 'success' if item.status.mtls_enabled else 'secondary' }}">{{ 'Подтверждён' if item.status.mtls_enabled else 'Не подтверждён' }}</span></td>
             <td><span class="badge bg-{{ 'success' if item.status.vpn_enabled else 'secondary' }}">{{ 'wg0 активен' if item.status.vpn_enabled else 'Выключен / нет данных' }}</span></td>
-            <td><span class="badge bg-{{ 'success' if item.status.vpn_connected else 'secondary' }}">{{ 'Есть свежий handshake' if item.status.vpn_connected else 'Нет свежего handshake' }}</span></td>
+            <td><span class="badge bg-{{ 'success' if item.status.vpn_connected else 'secondary' }}">{{ 'Недавнее рукопожатие' if item.status.vpn_connected else 'Нет свежего рукопожатия' }}</span></td>
             <td><a class="btn btn-sm btn-outline-modern" href="{{ url_for('manage_node', node_id=item.node.id) }}"><i class="bi bi-gear"></i> Управление</a></td>
           </tr>
         {% else %}
@@ -33,62 +51,62 @@
       </table>
     </div>
   </div>
-  <div class="premium-card p-4 mb-4">
+  <div id="vpn-journal" class="premium-card p-4 mb-4">
     <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
       <div>
-        <h5 class="mb-1">Журнал VPN-транзакций</h5>
-        <p class="text-muted small mb-0">Только чтение. Результат проверки локального журнала и резервной копии каждого Magos. Приватные ключи не показываются.</p>
+        <h5 class="mb-1">Журнал VPN-операций</h5>
+        <p class="text-muted small mb-0">Только чтение. «Ожидание» и «Успешно завершено» — штатные состояния. «Требует восстановления» блокирует новые изменения до проверки. Ключи и резервные копии не показываются.</p>
       </div>
       <button id="vpnTxHealthBtn" type="button" class="btn btn-outline-modern" onclick="vpnCheckTransactionHealth()">Проверить транзакции</button>
     </div>
-    <p role="status" id="vpnTxHealthMessage" class="text-muted small">Проверка ещё не выполнялась.</p>
+    <p role="status" id="vpnTxHealthMessage" class="text-muted small">Проверка ещё не запускалась.</p>
     <div class="table-responsive">
       <table class="table table-dark premium-table">
-        <thead><tr><th>Magos</th><th>Состояние</th><th>Этап</th><th>ID операции</th><th>Маршрутных операций</th><th>Требует внимания</th></tr></thead>
+        <thead><tr><th>Magos</th><th>Состояние</th><th>Этап</th><th>ID операции</th><th>Изменений маршрутов</th><th>Нужна проверка</th></tr></thead>
         <tbody id="vpnTxHealthRows"><tr><td colspan="6" class="text-muted text-center">Нет данных</td></tr></tbody>
       </table>
     </div>
   </div>
-  <div class="premium-card p-4 mb-4">
+  <div id="vpn-compare" class="premium-card p-4 mb-4">
     <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
       <div>
-        <h5 class="mb-1">Desired / Actual</h5>
-        <p class="text-muted small mb-0">Сверка фактического WireGuard с конфигурацией контроллера. Только чтение, без применения или перезапуска.</p>
+        <h5 class="mb-1">2. Соответствие конфигурации</h5>
+        <p class="text-muted small mb-0">Сравнивает настройки на Magos с теми, которые ожидает контроллер. Только чтение: маршруты и туннели не меняются.</p>
       </div>
       <button id="vpnReconcileBtn" type="button" class="btn btn-outline-modern" onclick="checkVpnDrift()">Сверить состояние</button>
     </div>
     <div id="vpnReconcileState" role="status" class="text-muted small mb-3">Нажмите «Сверить состояние», чтобы опросить Magos по mTLS.</div>
     <div class="table-responsive">
       <table class="table table-dark premium-table">
-        <thead><tr><th>Magos</th><th>Desired peers</th><th>Actual peers</th><th>Сверка</th><th>Причина</th></tr></thead>
+        <thead><tr><th>Magos</th><th>Ожидается пиров</th><th>Обнаружено пиров</th><th>Сверка</th><th>Причина</th></tr></thead>
         <tbody id="vpnReconcileRows"><tr><td colspan="5" class="text-muted text-center">Опрос ещё не выполнялся</td></tr></tbody>
       </table>
     </div>
   </div>
-  <div class="premium-card p-4 mb-4">
+  <div id="vpn-plan" class="premium-card p-4 mb-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
-      <div><h5 class="mb-1">Preview Changes</h5>
+      <div><h5 class="mb-1">3. Предпросмотр изменений</h5>
       <p class="text-muted small mb-0">Предварительная проверка. Не меняет конфигурации, интерфейсы или маршруты.</p></div>
       <button class="btn btn-outline-modern" id="vpnPreviewBtn" type="button" onclick="vpnPreviewChanges()">Показать изменения</button>
     </div>
     <div role="status" class="small text-muted mb-3" id="vpnPreviewMessage">Сначала выполните предпросмотр.</div>
-    <p class="text-muted small">Транзакции изменения маршрутов экспериментальные и по умолчанию отключены. После разрешения они выполняются отдельно для каждого Magos с подтверждением и повторной проверкой состояния.</p>
+    <p class="text-muted small">Предпросмотр безопасен и ничего не применяет. Само применение требует отдельного подтверждения для каждого Magos; сначала убедитесь, что журнал не требует внимания.</p>
     <div class="table-responsive">
       <table class="table table-dark premium-table">
-        <thead><tr><th>Magos</th><th>Добавить</th><th>Удалить</th><th>Изменить</th><th>Возможность применения</th><th>Действие</th></tr></thead>
+        <thead><tr><th>Magos</th><th>Добавить</th><th>Удалить</th><th>Изменить</th><th>Результат проверки</th><th>Действие</th></tr></thead>
         <tbody id="vpnPreviewRows"><tr><td colspan="6" class="text-center text-muted">Проверка ещё не запускалась</td></tr></tbody>
       </table>
     </div>
   </div>
   <div class="premium-card p-4">
-    <h5 class="mb-3">Желаемые VPN-связи</h5>
-    <p class="text-muted small">Список отражает записи контроллера, а не факт прохождения трафика. Для каждого соединения проверяйте handshake на узлах.</p>
+    <h5 class="mb-3">VPN-связи, заданные администратором</h5>
+    <p class="text-muted small">Заданные связи — это желаемая схема, а не гарантия доступности. Для каждого соединения проверяйте рукопожатие и прохождение трафика.</p>
     <div class="table-responsive">
       <table class="table table-dark premium-table">
         <thead><tr><th>Magos A</th><th>Magos B</th><th>Состояние</th></tr></thead>
         <tbody>
         {% for link in links %}
-          <tr><td>{{ link.left }}</td><td>{{ link.right }}</td><td><span class="badge bg-info">Desired</span></td></tr>
+          <tr><td>{{ link.left }}</td><td>{{ link.right }}</td><td><span class="badge bg-info">В конфигурации</span></td></tr>
         {% else %}
           <tr><td colspan="3" class="text-center text-muted">Связи ещё не заданы</td></tr>
         {% endfor %}
@@ -100,6 +118,36 @@
 {% endblock %}
 {% block scripts %}
 <script>
+const VPN_JOURNAL_STATES = Object.freeze({
+  idle: 'Ожидание', committed: 'Успешно завершено', rolled_back: 'Откат завершён',
+  prepared: 'Подготовлено', applying: 'Применяется', rolling_back: 'Выполняется откат',
+  recovery_required: 'Требует восстановления', in_progress: 'Выполняется',
+  unavailable: 'Нет ответа', not_initialized: 'Не инициализирован'
+});
+const VPN_JOURNAL_PHASES = Object.freeze({
+  none: '—', done: 'Завершено', route: 'Маршруты', wg_sync: 'WireGuard',
+  verify: 'Проверка', persist_config: 'Сохранение', restore: 'Откат',
+  manual: 'Ручное вмешательство', unknown: 'Неизвестно',
+  add_only_recovery: 'Откат добавления'
+});
+const VPN_REASONS = Object.freeze({
+  interface_inactive: 'Интерфейс WireGuard не запущен',
+  management_query_failed: 'Не удалось опросить Magos по mTLS',
+  route_preflight_rejected: 'Проверка маршрутов не пройдена',
+  route_changes_validated_but_not_applied: 'Проверенные изменения ожидают применения',
+  route_change_requires_transaction: 'Требуется отдельная транзакция маршрутов',
+  no_change: 'Изменений нет', orphan_backup: 'Резервная копия без журнала',
+  orphan_operation: 'Операция прервана до создания журнала',
+  unsettled_operation_ledger: 'Журнал и UUID операции требуют проверки',
+  unresolved_transaction: 'Обнаружена незавершённая операция',
+  missing_backup: 'Не найдена резервная копия операции',
+  invalid_operation_ledger: 'Повреждён журнал UUID',
+  management_status_unavailable: 'Не удалось получить статус управления'
+});
+function vpnJournalStateRu(code) { return VPN_JOURNAL_STATES[code] || 'Неизвестно (' + String(code || '—') + ')'; }
+function vpnJournalPhaseRu(code) { return VPN_JOURNAL_PHASES[code] || 'Неизвестно (' + String(code || '—') + ')'; }
+function vpnReasonRu(code) { return VPN_REASONS[code] || ('Код: ' + String(code || 'неизвестен')); }
+
 async function vpnCheckTransactionHealth() {
   const button = document.getElementById('vpnTxHealthBtn');
   const message = document.getElementById('vpnTxHealthMessage');
@@ -122,7 +170,7 @@ async function vpnCheckTransactionHealth() {
       const row = document.createElement('tr');
       const attention = item.needs_attention === true ? 'Требуется проверка'
         : item.needs_attention === false ? 'Нет' : 'Неизвестно';
-      const values = [item.node_name, item.state, item.phase, item.operation_id || '—', item.route_ops, attention];
+      const values = [item.node_name, vpnJournalStateRu(item.state), vpnJournalPhaseRu(item.phase), item.operation_id || '—', item.route_ops, attention];
       for (let index = 0; index < values.length; index++) {
         const cell = document.createElement('td');
         cell.textContent = String(values[index]);
@@ -131,7 +179,9 @@ async function vpnCheckTransactionHealth() {
       }
       target.appendChild(row);
     }
-    message.textContent = 'Проверено. Никакие изменения VPN не выполнялись.';
+    message.textContent = data.results.some(item => item.needs_attention !== false)
+      ? 'Проверено: один или несколько узлов требуют внимания. Изменений VPN не было.'
+      : 'Проверено: критических состояний нет. Изменений VPN не было.';
   } catch (error) {
     message.textContent = 'Ошибка чтения журналов: ' + error.message;
   } finally {
@@ -177,11 +227,11 @@ async function applyVpnRouteTransaction(nodeId, nodeName, previewRevision, butto
       throw new Error(payload.error || 'HTTP ' + response.status);
     }
     info.textContent = 'Транзакция ' + nodeName + ' (' + operationId +
-      ') завершена; сервер проверил peers. Повторите сверку VPN и проверьте handshake.';
+      ') завершена; сервер проверил пиры. Проверьте рукопожатия WireGuard.';
   } catch (error) {
     info.textContent = 'Ошибка транзакции ' + nodeName +
       ' (ID ' + operationId + '): ' + error.message +
-      '. Результат может быть неизвестен. Не запускайте новый Apply до проверки журнала и состояния узла.';
+      '. Результат может быть неизвестен. Не повторяйте применение до проверки журнала и состояния узла.';
   }
   // The previous preview must never remain a reusable authorization.
   document.getElementById('vpnPreviewRows').replaceChildren();
@@ -212,7 +262,9 @@ async function vpnPreviewChanges() {
         '; удалить: ' + (delta.remove || []).join(', ') + ')' : '';
       const verdict = item.decision === 'no_change' ? 'Без изменений'
         : item.decision === 'eligible' ? 'Можно подготовить к применению'
-        : 'Изменение заблокировано: ' + item.reason + routeText;
+        : item.reason === 'route_changes_validated_but_not_applied'
+          ? 'Проверено; требуется отдельное применение' + routeText
+        : 'Изменение заблокировано: ' + vpnReasonRu(item.reason) + routeText;
       for (const value of [item.node_name, item.add, item.remove, item.update, verdict]) {
         const td = document.createElement('td');
         td.textContent = String(value);
@@ -268,9 +320,9 @@ async function checkVpnDrift() {
     rows.replaceChildren();
     for (const item of payload.results) {
       const row = document.createElement('tr');
-      const label = item.state === 'in_sync' ? 'In sync'
-          : item.state === 'drift' ? 'Drift' : 'Unknown';
-      const reason = item.reason || (item.state === 'drift'
+      const label = item.state === 'in_sync' ? 'Совпадает'
+          : item.state === 'drift' ? 'Есть расхождения' : 'Не удалось проверить';
+      const reason = (item.reason ? vpnReasonRu(item.reason) : null) || (item.state === 'drift'
           ? 'Отсутствует / отличается пир: ' + item.missing_peers + ' / ' + item.unexpected_peers + ' / ' + item.different_peers : '—');
       const values = [item.node_name, item.desired_peers, item.observed_peers ?? '—', label, reason];
       for (let i = 0; i < values.length; i++) {
