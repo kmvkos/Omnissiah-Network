@@ -129,7 +129,7 @@ class IsolatedLinuxMeshBackend:
             journal = _load_journal(self._state / "mesh-transaction.json")
             if not isinstance(journal, dict) or journal.get("state") not in ("committed", "rolled_back"):
                 raise TransactionBlocked("Unresolved backup already present; manual recovery required")
-            if self._backup.stat().st_uid != 0 or self._backup.stat().st_mode & 0o077:
+            if self._backup.stat().st_uid != os.geteuid() or self._backup.stat().st_mode & 0o077:
                 raise TransactionBlocked("Unsafe previous backup permissions")
             try:
                 previous = json.loads(self._backup.read_text())
