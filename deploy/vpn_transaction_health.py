@@ -55,7 +55,7 @@ def inspect_transaction(directory):
     if lock_path.is_symlink():
         return _bad("unsafe_lock_file")
     if not lock_path.exists():
-        if journal.exists():
+        if journal.exists() or (folder / "mesh-operation-ledger.json").exists() or (folder / "mesh-operation-ledger.json").is_symlink():
             return _bad("missing_lock_file")
         # A backup can be durable before the first journal write. Never
         # misreport this crash window as a clean idle state.
