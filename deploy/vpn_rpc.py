@@ -42,8 +42,11 @@ def process(message):
         raise ValueError("Unexpected plan")
     operation_id = message.get("operation_id")
     if verb == "route-transaction":
-        from vpn_operation_fence import validate_operation_id
-        validate_operation_id(operation_id)
+        from vpn_operation_fence import OperationRejected, validate_operation_id
+        try:
+            validate_operation_id(operation_id)
+        except OperationRejected as exc:
+            raise ValueError("Invalid operation UUIDv4") from exc
     elif operation_id is not None:
         raise ValueError("Unexpected operation ID")
     command = ["/usr/bin/python3", HELPER, verb, "--node-name", node_name]
