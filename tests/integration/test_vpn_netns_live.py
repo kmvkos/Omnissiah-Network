@@ -166,5 +166,77 @@ class IsolatedWireGuardIntegration(unittest.TestCase):
         self.assertFalse((self.state / "mesh-backup.json").exists())
 
 
+    def test_sequential_real_peer_additions_preserve_existing_mesh(self):
+        """Apply a third peer, then a fourth without disrupting previous routes."""
+        first = run_offline_mesh_transaction(
+            self.plan, self.desired["peers"], self.backend, self.state)
+        self.assertEqual(first["state"], "committed")
+        self.assertEqual(self._route_set(), {OLD_ROUTE, NEW_ROUTE})
+        _, third_key = keypair()
+        extra = {
+            "public_key": third_key,
+            "endpoint": "192.0.2.5:51820",
+            "allowed_ips": ["10.77.0.5/32"],
+            "keepalive": 25,
+        }
+        next_desired = copy.deepcopy(self.desired)
+        next_desired["peers"].append(extra)
+        from vpn_route_journal import prepare_transaction
+        previous_peers, previous_routes = self.backend.snapshot()
+        next_plan = prepare_transaction(next_desired["peers"], previous_peers, previous_routes)
+        second_backend = IsolatedLinuxMeshBackend(
+            next_desired, next_plan,
+            state_dir=self.state, config_path=self.config,
+            runner=self._runner, allow_mutations=True)
+        second = run_offline_mesh_transaction(
+            next_plan, next_desired["peers"], second_backend, self.state)
+        self.assertEqual(second["state"], "committed")
+        self.assertEqual(self._route_set(), {OLD_ROUTE, NEW_ROUTE, "10.77.0.5/32"})
+        self.assertEqual(self._wg_keys(), {self.old_public, self.new_public, third_key})
+        self.assertEqual(len(list(self.state.glob("mesh-backup-*.json"))), 1)
+
+    def test_second_route_failure_rolls_back_only_second_change(self):
+        """An error during a later expansion must keep all earlier committed peers."""
+        run_offline_mesh_transaction(self.plan, self.desired["peers"],
+                                     self.backend, self.state)
+        before_second = self._runner(
+            ["wg", "showconf", "wg0"], capture_output=True, text=True,
+            timeout=20, check=False).stdout
+        before_file = self.config.read_bytes()
+        _, third_key = keypair()
+        next_desired = copy.deepcopy(self.desired)
+        next_desired["peers"].append({
+            "public_key": third_key,
+            "endpoint": "192.0.2.5:51820",
+            "allowed_ips": ["10.77.0.5/32"],
+            "keepalive": 25,
+        })
+        from vpn_route_journal import prepare_transaction
+        peers, routes = self.backend.snapshot()
+        next_plan = prepare_transaction(next_desired["peers"], peers, routes)
+        second_backend = IsolatedLinuxMeshBackend(
+            next_desired, next_plan, state_dir=self.state,
+            config_path=self.config, runner=self._runner,
+            allow_mutations=True)
+        real_step = second_backend.route_step
+
+        def fail_after_route(step):
+            real_step(step)
+            raise RuntimeError("Injected second-stage route failure")
+
+        second_backend.route_step = fail_after_route
+        with self.assertRaisesRegex(RuntimeError, "Injected second-stage"):
+            run_offline_mesh_transaction(
+                next_plan, next_desired["peers"], second_backend, self.state)
+        self.assertEqual(self._route_set(), {OLD_ROUTE, NEW_ROUTE})
+        self.assertEqual(self._wg_keys(), {self.old_public, self.new_public})
+        self.assertEqual(self.config.read_bytes(), before_file)
+        self.assertEqual(self._runner(
+            ["wg", "showconf", "wg0"], capture_output=True, text=True,
+            timeout=20, check=False).stdout, before_second)
+        self.assertEqual(json.loads(
+            (self.state / "mesh-transaction.json").read_text())["state"], "rolled_back")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
