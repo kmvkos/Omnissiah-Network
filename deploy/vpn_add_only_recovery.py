@@ -75,8 +75,15 @@ def _peers_by_key(peers, *, desired=False):
 
 def _unmanaged_routes(routes, add_destinations):
     """Return stable snapshot of every route not explicitly owned by this add."""
-    rows = [normalize_route(r) for r in routes]
-    unowned = [row for row in rows if row is not None and row["dst"] not in add_destinations]
+    # The general /32 planner ignores the default route; recovery must not.
+    # Even unrelated default-route drift is a reason to refuse automation.
+    unowned = []
+    for raw in routes:
+        row = normalize_route(raw)
+        if row is None:
+            unowned.append({"kernel_default": raw})
+        elif row["dst"] not in add_destinations:
+            unowned.append(row)
     return sorted(json.dumps(row, sort_keys=True) for row in unowned)
 
 
@@ -213,12 +220,30 @@ def reconcile_add_only(folder, backend, management_addresses):
         for dst in sorted(added):
             current_peers, current_routes = backend.snapshot()
             _validate_new_routes(current_routes, added)
+            if (_unmanaged_routes(current_routes, added)
+                    != _unmanaged_routes(old["routes"], added)
+                    or _protect_paths(backend, protected) != before_paths):
+                raise AddOnlyRecoveryBlocked("Foreign route changed during rollback")
+            observed = _peers_by_key(current_peers)
+            if (not set(before) <= set(observed) or not set(observed) <= set(after)
+                    or any(observed[k] != before[k] for k in before)
+                    or any(observed[k] != after[k] for k in set(observed) - set(before))):
+                raise AddOnlyRecoveryBlocked("Foreign peer changed during rollback")
             if any(normalize_route(route) is not None
                    and normalize_route(route)["dst"] == dst for route in current_routes):
                 backend._command(["ip", "-4", "route", "delete", dst, "dev", "wg0", "table", "main"])
         for key in sorted(set(after) - set(before)):
-            current_peers, _ = backend.snapshot()
-            if key in _peers_by_key(current_peers):
+            current_peers, current_routes = backend.snapshot()
+            if (_unmanaged_routes(current_routes, added)
+                    != _unmanaged_routes(old["routes"], added)
+                    or _protect_paths(backend, protected) != before_paths):
+                raise AddOnlyRecoveryBlocked("Foreign route changed during rollback")
+            observed = _peers_by_key(current_peers)
+            if (not set(before) <= set(observed) or not set(observed) <= set(after)
+                    or any(observed[k] != before[k] for k in before)
+                    or any(observed[k] != after[k] for k in set(observed) - set(before))):
+                raise AddOnlyRecoveryBlocked("Foreign peer changed during rollback")
+            if key in observed:
                 backend._command(["wg", "set", "wg0", "peer", key, "remove"])
 
         peers_final, routes_final = backend.snapshot()
