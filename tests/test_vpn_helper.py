@@ -99,6 +99,7 @@ def test_failed_post_sync_verification_restores_previous_live_peers(monkeypatch,
         returncode = 0
     monkeypatch.setattr(mod.subprocess, "run", lambda *a, **kw: Active())
     monkeypatch.setattr(mod, "ensure_keys", lambda *a: KEY2)
+    monkeypatch.setattr(mod, "root_owned_plan", lambda candidate: True)
     actions = []
     def fake_run(cmd, *, input=None):
         actions.append((cmd, input))
