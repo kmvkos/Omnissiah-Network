@@ -20,10 +20,11 @@ def run_direct_route_transaction(source, dest, source_plan, dest_plan, sender,
     """
     nodes = ((source, source_plan), (dest, dest_plan))
     prepared = {}
-    committed = []
-    result = None
+    prepared_unknown = False
+    attempted_prepare = None
     try:
         for node, plan in nodes:
+            attempted_prepare = node.name
             response = sender(node, "route-ext-prepare", plan, operation_id=opid)
             if (not isinstance(response, dict)
                     or response.get("state") != "prepared"
@@ -32,6 +33,7 @@ def run_direct_route_transaction(source, dest, source_plan, dest_plan, sender,
                     or len(response["revision"]) != 64):
                 raise CrossRouteCoordinationError("No authenticated Prepare acknowledgement")
             prepared[node.name] = response["revision"]
+            attempted_prepare = None
             persist_state("prepared", prepared.get(source.name), prepared.get(dest.name))
         persist_state("committing", prepared[source.name], prepared[dest.name])
         # Ensure the destination can route return traffic before the ingress
@@ -42,7 +44,6 @@ def run_direct_route_transaction(source, dest, source_plan, dest_plan, sender,
                 "node_name": node.name, "address": node.ip_pool,
                 "revision": revision,
             }, operation_id=opid)
-            committed.append(node.name)  # Unknown result may still have changed kernel.
             if (not isinstance(response, dict)
                     or response.get("state") != "committed"
                     or response.get("revision") != revision
@@ -74,7 +75,14 @@ def run_direct_route_transaction(source, dest, source_plan, dest_plan, sender,
     except Exception as exc:
         # IMPORTANT: the first peer may be committed even if the RPC times out.
         # Attempt compensation for every prepared half, in reverse order.
-        persist_state("reverting", prepared.get(source.name), prepared.get(dest.name))
+        # A Prepare RPC can time out after root wrote a journal. Without an
+        # ACK/revision we cannot safely revert that half, so leave a durable
+        # recovery_required fence and never claim rollback completed.
+        unknown_prepare = attempted_prepare is not None
+        try:
+            persist_state("reverting", prepared.get(source.name), prepared.get(dest.name))
+        except Exception:
+            unknown_prepare = True
         errors = []
         for node, plan in reversed(nodes):
             revision = prepared.get(node.name)
@@ -89,9 +97,11 @@ def run_direct_route_transaction(source, dest, source_plan, dest_plan, sender,
                     errors.append(node.name)
             except Exception:
                 errors.append(node.name)
-        if errors:
+        if errors or unknown_prepare:
             persist_state("recovery_required", prepared.get(source.name), prepared.get(dest.name))
+            suspects = errors + ([attempted_prepare] if unknown_prepare and attempted_prepare else [])
             raise CrossRouteCoordinationError(
-                "Distributed route outcome UNKNOWN; manual inspection on " + ", ".join(errors)) from exc
+                "Distributed route outcome UNKNOWN; manual inspection on "
+                + ", ".join(suspects or ["controller ledger"])) from exc
         persist_state("reverted", prepared.get(source.name), prepared.get(dest.name))
         raise CrossRouteCoordinationError("Distributed route change aborted and compensated") from exc
