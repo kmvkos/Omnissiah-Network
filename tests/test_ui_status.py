@@ -50,7 +50,7 @@ def test_vpn_reconcile_script_is_emitted_in_script_block_not_title():
     assert "<script" not in title
     assert "checkVpnDrift" not in title
     assert "async function checkVpnDrift()" in script
-    assert "url_for(\"reconcile_vpn_mesh\")" in script
+    assert 'url_for("cognitors.vpn_managed_mesh_reconcile")' in script\n    assert 'url_for("cognitors.vpn_managed_mesh_change_preview")' in script
 
 def test_reconcile_uses_request_context_not_contextless_threads():
     source = (ROOT / "src/app.py").read_text()
