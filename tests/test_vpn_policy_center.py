@@ -203,6 +203,7 @@ def test_cross_magos_preview_has_explicit_blocker_and_no_apply(site):
         owner = General.query.filter_by(name="magos01").one()
         target = ProtectedNetworkDraft.query.one()
         target.parent_magos_id = owner.id
+        owner.public_key = "C"*43+"="
         db.session.commit()
     login(client, admin)
     response = client.get(f"/access-policy/apply/{mid}/preview")
