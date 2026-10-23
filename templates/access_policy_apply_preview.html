@@ -55,6 +55,19 @@
         </span>
       </div>
       {% if path.error %}<p class="text-danger small">{{ path.error }}</p>{% endif %}
+      {% if route_apply_enabled and path.client_id and path.object_id and not path.error %}
+      <form class="mt-2"
+            action="{{ url_for('cross_route.apply_cross_route', client_id=path.client_id, object_id=path.object_id) }}"
+            method="post">
+        {{ confirmation.hidden_tag() }}
+        <label class="form-label">Подтвердите пару Magos: {{ path.source_name }}-&gt;{{ path.destination_name }}</label>
+        <input class="form-control mb-2" name="confirm_path" required
+               placeholder="{{ path.source_name }}->{{ path.destination_name }}">
+        <button class="btn btn-outline-warning" type="submit">
+          Подготовить и согласованно добавить маршруты на двух Magos
+        </button>
+      </form>
+      {% endif %}
       {% for probe in [path.source, path.destination] %}
         {% if probe %}
         <div class="small mt-2">
