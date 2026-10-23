@@ -195,7 +195,10 @@
                   </form>
                 </details>
               {% else %}
-                <span class="text-warning small">Удаление ожидает применения</span>
+                <form action="{{ url_for('access_policies.cancel_policy_delete', rule_id=rule.id) }}" method="post">
+                  {{ form.csrf_token }}
+                  <button class="btn btn-sm btn-outline-warning" type="submit">Отменить удаление</button>
+                </form>
               {% endif %}
             </td>
           </tr>
