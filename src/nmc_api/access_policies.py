@@ -54,7 +54,7 @@ def vpn_access_policies():
     form = AccessPolicyForm()
     form.source_cognitor_id.choices = [
         (item.id, item.name + (" — применён на Magos" if item.status == "applied"
-                               else " — черновик, пока не применён"))
+                               else " — черновик, применение не подтверждено в БД"))
         for item in clients
     ]
     form.target_object_id.choices = [
