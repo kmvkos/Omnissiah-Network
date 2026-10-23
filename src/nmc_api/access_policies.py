@@ -82,12 +82,31 @@ def vpn_access_policies():
             flash(str(exc) if isinstance(exc, AccessPolicyError)
                   else "Название или условие правила уже существуют", "danger")
     rules = AccessPolicyDraft.query.order_by(AccessPolicyDraft.created_at.desc()).all()
+    from vpn_client_route_expectations import expected_client_allowed_ips
+    client_route_requirements = []
+    for client in clients:
+        if client.status != "applied":
+            continue
+        try:
+            values = expected_client_allowed_ips(client, rules)
+            client_route_requirements.append({
+                "name": client.name, "gateway": client.parent_magos.name,
+                "allowed_ips": ", ".join(values),
+                "networks": [n for n in values if n != client.parent_magos.ip_pool],
+            })
+        except ValueError:
+            client_route_requirements.append({
+                "name": client.name, "gateway": "неизвестен",
+                "allowed_ips": "Ошибка проверки конфигурации",
+                "networks": [],
+            })
     return render_template("vpn_access_policies.html", form=form, rules=rules,
                            clients=clients, resources=resources,
                            unresolved_clients=unresolved_clients,
                            legacy_clients=legacy_clients,
                            legacy_policy_count=AccessPolicyRule.query.count(),
-                           magos_nodes=General.query.filter_by(role="Magos").order_by(General.name).all())
+                           magos_nodes=General.query.filter_by(role="Magos").order_by(General.name).all(),
+                           client_route_requirements=client_route_requirements)
 
 
 @access_policies_bp.route("/vpn/access-policies/<int:rule_id>/preview",
