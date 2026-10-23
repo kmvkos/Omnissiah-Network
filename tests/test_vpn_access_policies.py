@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nmc_models import BaseUser, General, db
 from nmc_api.access_policies import access_policies_bp
+from nmc_api.policy_apply import policy_apply_bp
 from vpn_cognitor_models import CognitorDraft
 from vpn_protected_models import ProtectedNetworkDraft
 from vpn_access_policy_models import AccessPolicyDraft
@@ -134,6 +135,7 @@ def web(tmp_path):
         return db.session.get(BaseUser, int(uid))
 
     app.register_blueprint(access_policies_bp)
+    app.register_blueprint(policy_apply_bp)
     with app.app_context():
         db.create_all()
         admin = BaseUser(email="admin", password_hash="x", role="admin")
