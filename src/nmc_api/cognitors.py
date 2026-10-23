@@ -382,6 +382,10 @@ def prevent_legacy_mesh_writes_over_cognitor():
     """Backend gate: UI hiding alone must NEVER authorize destructive Mesh Apply."""
     if request.path != "/api/v2/vpn/mesh/operation" or request.method != "POST":
         return None
+    # Leave authentication/authorization to the existing route decorators,
+    # rather than leaking protected Cognitor inventory to unauthenticated callers.
+    if not current_user.is_authenticated or current_user.role != "admin":
+        return None
     body = request.get_json(silent=True)
     if not isinstance(body, dict) or body.get("action") not in (
             "prepare", "apply", "route-transaction"):
