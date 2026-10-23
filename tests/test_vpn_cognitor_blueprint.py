@@ -237,3 +237,123 @@ def test_handshake_status_must_ignore_other_peers(web, monkeypatch):
     assert response.status_code == 200
     assert "True|True|92" in response.get_data(as_text=True)
     assert "1111" not in response.get_data(as_text=True)
+
+
+
+def test_full_mesh_plus_applied_cognitor_endpoints_and_legacy_write_gate(web, monkeypatch):
+    """A registered client is not a foreign peer, and legacy Mesh Apply is denied."""
+    app, client, admin, guest, first_id = web
+    login(client, admin)
+    from nmc_models import NodeConnection
+    from types import SimpleNamespace
+    import sys
+    mesh_a = base64.b64encode(b"c" * 32).decode()
+    mesh_b = base64.b64encode(b"d" * 32).decode()
+    client_key = base64.b64encode(b"e" * 32).decode()
+    with app.app_context():
+        magos02 = General(name="magos02", ip_pool="10.77.0.3/32",
+                          role="Magos", endpoint="192.168.32.169",
+                          listen_port=51820, public_key=mesh_a, private_key="")
+        magos03 = General(name="magos03", ip_pool="10.77.0.4/32",
+                          role="Magos", endpoint="192.168.32.172",
+                          listen_port=51820, public_key=mesh_b, private_key="")
+        db.session.add_all([magos02, magos03])
+        db.session.flush()
+        magos2_id, magos3_id = magos02.id, magos03.id
+        db.session.add_all([
+            NodeConnection(node1_id=first_id, node2_id=magos2_id),
+            NodeConnection(node1_id=first_id, node2_id=magos3_id),
+            NodeConnection(node1_id=magos2_id, node2_id=magos3_id),
+            CognitorDraft(name="cognitor01", public_key=client_key,
+                         vpn_address="10.77.0.5/32", parent_magos_id=magos3_id,
+                         status="applied"),
+        ])
+        db.session.commit()
+
+    known = {
+        "magos01": [{"public_key": mesh_a, "allowed_ips": ["10.77.0.3/32"], "keepalive": 25},
+                    {"public_key": mesh_b, "allowed_ips": ["10.77.0.4/32"], "keepalive": 25}],
+        "magos02": [{"public_key": KEY2, "allowed_ips": ["10.77.0.2/32"], "keepalive": 25},
+                    {"public_key": mesh_b, "allowed_ips": ["10.77.0.4/32"], "keepalive": 25}],
+        "magos03": [{"public_key": KEY2, "allowed_ips": ["10.77.0.2/32"], "keepalive": 25},
+                    {"public_key": mesh_a, "allowed_ips": ["10.77.0.3/32"], "keepalive": 25},
+                    {"public_key": client_key, "allowed_ips": ["10.77.0.5/32"], "keepalive": 0}],
+    }
+    calls = []
+    def mock_send(node, action, plan=None, operation_id=None):
+        calls.append((node.name, action))
+        assert action == "status"   # healthy client: no route-preview or mutations
+        return {"active": True, "peers": list(known[node.name])}
+    monkeypatch.setitem(sys.modules, "app", SimpleNamespace(_vpn_v2_send=mock_send))
+
+    compared = client.get("/vpn/cognitors/mesh/reconcile")
+    assert compared.status_code == 200
+    values = {entry["node_name"]: entry for entry in compared.get_json()["results"]}
+    assert all(entry["state"] == "in_sync" for entry in values.values())
+    assert values["magos03"]["desired_peers"] == 3
+    assert values["magos03"]["desired_mesh_peers"] == 2
+    assert values["magos03"]["desired_cognitor_peers"] == 1
+    assert values["magos03"]["unregistered_peers"] == 0
+    checked = client.get("/vpn/cognitors/mesh/change-preview")
+    assert checked.status_code == 200
+    preview = {entry["node_name"]: entry for entry in checked.get_json()["results"]}
+    assert preview["magos03"]["decision"] == "no_change"
+    assert preview["magos03"]["remove"] == 0
+    assert preview["magos03"]["transaction_available"] is False
+    assert all(action == "status" for _, action in calls)
+
+    legacy = client.post("/api/v2/vpn/mesh/operation",
+        headers={"X-VPN-Explicit-Apply": "ENABLE_TEST_MESH"},
+        json={"action": "route-transaction", "node_id": magos3_id,
+              "expected_revision": "a" * 64, "operation_id": "00000000-0000-4000-8000-000000000001"})
+    assert legacy.status_code == 409
+    assert "Cognitor" in legacy.get_json()["error"]
+    assert all(action == "status" for _, action in calls)
+    # Even after access via URL/API, no write call is made.
+
+
+
+def test_unresolved_cognitor_draft_blocks_legacy_mesh_apply(web):
+    """A timed-out add can leave a live peer but status='draft' in controller."""
+    app, client, admin, _, magos_id = web
+    login(client, admin)
+    with app.app_context():
+        db.session.add(CognitorDraft(
+            name="maybe-installed", public_key=KEY, vpn_address="10.77.0.5/32",
+            status="draft", parent_magos_id=magos_id))
+        db.session.commit()
+    for action in ("prepare", "apply", "route-transaction"):
+        response = client.post("/api/v2/vpn/mesh/operation",
+            headers={"X-VPN-Explicit-Apply": "ENABLE_TEST_MESH"},
+            json={"action": action, "node_id": magos_id,
+                  "expected_revision": "a" * 64,
+                  "operation_id": "00000000-0000-4000-8000-000000000001"})
+        assert response.status_code == 409
+        assert "Cognitor" in response.get_json()["error"]
+
+
+
+def test_unknown_peer_with_applied_cognitor_does_not_offer_mesh_apply(web, monkeypatch):
+    app, client, admin, _, magos_id = web
+    login(client, admin)
+    with app.app_context():
+        db.session.add(CognitorDraft(
+            name="client01", public_key=KEY, vpn_address="10.77.0.5/32",
+            status="applied", parent_magos_id=magos_id))
+        db.session.commit()
+    from types import SimpleNamespace
+    import sys
+    unknown = base64.b64encode(b"x" * 32).decode()
+    monkeypatch.setitem(sys.modules, "app", SimpleNamespace(
+        _vpn_v2_send=lambda *args, **kwargs: {
+            "active": True, "peers": [
+                {"public_key": KEY, "allowed_ips": ["10.77.0.5/32"], "keepalive": 0},
+                {"public_key": unknown, "allowed_ips": ["10.77.0.99/32"], "keepalive": 0}
+            ]}))
+    preview = client.get("/vpn/cognitors/mesh/change-preview")
+    assert preview.status_code == 200
+    row = preview.get_json()["results"][0]
+    assert row["decision"] == "blocked"
+    assert row["remove"] == 1
+    assert row["transaction_available"] is False
+    assert row["reason"] == "cognitor_managed_drift_requires_review"

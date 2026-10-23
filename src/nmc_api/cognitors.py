@@ -3,14 +3,14 @@
 This blueprint deliberately keeps staged Cognitors separate from legacy
 General(Cognitor), whose old routes can mutate WireGuard directly.
 """
-from flask import Blueprint, abort, flash, redirect, render_template, url_for
+from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from flask_wtf import FlaskForm
 from sqlalchemy.exc import IntegrityError
 from wtforms import SelectField, StringField, SubmitField
 from wtforms.validators import DataRequired, Regexp
 
-from nmc_models import General, db
+from nmc_models import General, NodeConnection, db
 from vpn_cognitor_models import CognitorDraft
 from vpn_cognitor_validation import CognitorValidationError, validate_draft
 
@@ -254,3 +254,158 @@ def vpn_cognitor_status(draft_id):
                    "Проверьте mTLS, WireGuard и журналы.")
     return render_template("vpn_cognitor_status.html", draft=draft,
                            magos=magos, seen=seen, failure=failure)
+
+
+def _cognitor_mesh_plans():
+    """Build current registered desired peers once for a read-only request."""
+    from vpn_topology import project_magos_mesh
+    magos = General.query.filter_by(role="Magos").all()
+    plans = project_magos_mesh(magos, NodeConnection.query.all())
+    clients = CognitorDraft.query.filter_by(status="applied").all()
+    by_parent = {}
+    for client in clients:
+        by_parent.setdefault(client.parent_magos_id, []).append(client)
+    return plans, {node.id: node for node in magos}, by_parent
+
+
+@cognitors_bp.route("/vpn/cognitors/mesh/reconcile", methods=["GET"])
+@login_required
+def vpn_managed_mesh_reconcile():
+    """Full read-only Mesh + Cognitor state over trusted Magos mTLS."""
+    if current_user.role != "admin":
+        abort(403)
+    from vpn_cognitor_mesh import CognitorMeshError, observe_managed
+    try:
+        plans, nodes, clients = _cognitor_mesh_plans()
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Cannot project managed Mesh inventory")
+        return jsonify(error="Не удалось построить ожидаемую VPN-топологию"), 409
+    records = []
+    for plan in plans:
+        try:
+            # Reconcile the desired inventory first: if registration contains
+            # duplicate keys/IPs, do not claim sync even if the kernel looks OK.
+            from vpn_cognitor_mesh import compose_expected
+            compose_expected(plan, clients.get(plan["node_id"], []))
+            from app import _vpn_v2_send
+            observed = _vpn_v2_send(nodes[plan["node_id"]], "status")
+            record = observe_managed(plan, clients.get(plan["node_id"], []), observed)
+        except CognitorMeshError:
+            record = {"node_id": plan["node_id"], "node_name": plan["node_name"],
+                      "state": "unknown", "reason": "cognitor_registry_conflict",
+                      "desired_peers": None, "observed_peers": None,
+                      "desired_mesh_peers": len(plan["peers"]),
+                      "desired_cognitor_peers": len(clients.get(plan["node_id"], [])),
+                      "interface_active": None, "missing_peers": 0,
+                      "unexpected_peers": 0, "different_peers": 0}
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Managed Mesh reconcile failed for %s", plan["node_name"], exc_info=True)
+            record = {"node_id": plan["node_id"], "node_name": plan["node_name"],
+                      "state": "unknown", "reason": "management_query_failed",
+                      "desired_peers": len(plan["peers"]) + len(clients.get(plan["node_id"], [])),
+                      "desired_mesh_peers": len(plan["peers"]),
+                      "desired_cognitor_peers": len(clients.get(plan["node_id"], [])),
+                      "observed_peers": None, "interface_active": None,
+                      "missing_peers": 0, "unexpected_peers": 0, "different_peers": 0}
+        records.append(record)
+    return jsonify(results=records, applied=False)
+
+
+@cognitors_bp.route("/vpn/cognitors/mesh/change-preview", methods=["GET"])
+@login_required
+def vpn_managed_mesh_change_preview():
+    """No deletion offer for a registered Cognitor, even when Mesh drifts."""
+    if current_user.role != "admin":
+        abort(403)
+    from vpn_cognitor_mesh import CognitorMeshError, preview_managed
+    from vpn_change_preview import preview as plain_preview
+    try:
+        plans, nodes, clients = _cognitor_mesh_plans()
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Cannot project managed preview")
+        return jsonify(error="Не удалось построить ожидаемую VPN-топологию"), 409
+    records = []
+    for plan in plans:
+        registered = clients.get(plan["node_id"], [])
+        try:
+            from app import _vpn_v2_send
+            observed = _vpn_v2_send(nodes[plan["node_id"]], "status")
+            result = preview_managed(plan, registered, observed)
+            if not registered and result.get("reason") == "route_change_requires_transaction":
+                # Preserve existing Mesh-only workflow only when no Cognitor is
+                # registered for this specific parent Magos.
+                strict_plan = {
+                    "node_name": plan["node_name"], "address": plan["address"],
+                    "listen_port": plan["listen_port"],
+                    "peers": [{k: peer[k] for k in
+                               ("public_key", "endpoint", "allowed_ips", "keepalive")}
+                              for peer in plan["peers"]],
+                }
+                try:
+                    checked = _vpn_v2_send(nodes[plan["node_id"]], "route-preview", strict_plan)
+                    if (checked.get("safe_to_plan") is not True
+                            or checked.get("writes_performed") is not False
+                            or not isinstance(checked.get("route_delta"), dict)):
+                        raise ValueError("Unexpected root preview response")
+                    result["route_delta"] = checked["route_delta"]
+                    result["reason"] = "route_changes_validated_but_not_applied"
+                    from vpn_tx_revision import plan_revision
+                    from app import app as main_app
+                    result["preview_revision"] = plan_revision(strict_plan)
+                    result["transaction_available"] = bool(
+                        main_app.config.get("VPN_ROUTE_TRANSACTIONS_ENABLED", False))
+                except Exception:
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "Root route preview rejected %s", plan["node_name"], exc_info=True)
+                    result["reason"] = "route_preflight_rejected"
+        except CognitorMeshError:
+            result = {"decision": "blocked", "reason": "cognitor_registry_conflict",
+                      "add": 0, "remove": 0, "update": 0, "transaction_available": False}
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Managed Mesh preview failed for %s", plan["node_name"], exc_info=True)
+            result = {"decision": "blocked", "reason": "management_query_failed",
+                      "add": 0, "remove": 0, "update": 0, "transaction_available": False}
+        records.append({"node_id": plan["node_id"], "node_name": plan["node_name"],
+                        **result})
+    return jsonify(results=records, writes_performed=False)
+
+
+@cognitors_bp.before_app_request
+def prevent_legacy_mesh_writes_over_cognitor():
+    """Backend gate: UI hiding alone must NEVER authorize destructive Mesh Apply."""
+    if request.path != "/api/v2/vpn/mesh/operation" or request.method != "POST":
+        return None
+    # Leave authentication/authorization to the existing route decorators,
+    # rather than leaking protected Cognitor inventory to unauthenticated callers.
+    if not current_user.is_authenticated or current_user.role != "admin":
+        return None
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or body.get("action") not in (
+            "prepare", "apply", "route-transaction"):
+        return None
+    node_id = body.get("node_id")
+    if type(node_id) is not int:
+        return None
+    try:
+        # A timed-out cognitor-add may have succeeded on Magos while the DB
+        # still says 'draft'.  Until the result is reconciled, a Mesh-only
+        # write can delete the actual client peer.  All registrations block
+        # this legacy mutation path, not only confirmed 'applied' entries.
+        has_clients = CognitorDraft.query.filter_by(
+            parent_magos_id=node_id).first() is not None
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Cognitor safety interlock unavailable")
+        return jsonify(error="Статус Cognitor недоступен, Mesh Apply заблокирован"), 503
+    if has_clients:
+        return jsonify(error="На Magos зарегистрирован Cognitor. Даже черновик может "
+                       "иметь неопределённый результат Apply. Старый Mesh Apply "
+                       "заблокирован до безопасной сверки состояния."), 409
+    return None
