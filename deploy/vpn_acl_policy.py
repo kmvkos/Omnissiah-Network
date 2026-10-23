@@ -217,6 +217,20 @@ class LinuxACL:
         self._run(["nft", "-c", "-f", "-"], input=nft_batch(plan, replace=present))
         return previous, present
 
+    def status(self):
+        active = self._active()
+        if bool(active) != self._table_present():
+            raise PolicyRejected("Policy state drift requires manual recovery")
+        rollback_file = self.state / "acl-rollback.json"
+        recovery = self.state / "acl-previous.json"
+        return {
+            "active_revision": active["digest"] if active else None,
+            "rollback_available": bool(active) and rollback_file.is_file()
+                                  and not rollback_file.is_symlink() and not recovery.exists(),
+            "recovery_required": recovery.exists(),
+            "writes_performed": False,
+        }
+
     def preview(self, raw):
         plan = normalize(raw, self.node_name, self.protected_ips)
         _, present = self._verify(plan)
