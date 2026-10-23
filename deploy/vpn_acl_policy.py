@@ -339,7 +339,7 @@ class LinuxACL:
                          json.dumps({"operation_id": operation_id, "previous": current}))
             try:
                 if previous is None:
-                    self._run(["nft", "-f", "-"], input=f"delete table inet {TABLE}\\n")
+                    self._run(["nft", "-f", "-"], input=f"delete table inet {TABLE}\n")
                     (self.state / "acl-active.json").unlink()
                     rollback_path.unlink()
                     new_revision = None
