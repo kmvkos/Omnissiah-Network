@@ -1,0 +1,57 @@
+{% extends 'layout.html' %}
+{% block title %}Предпросмотр применения политик{% endblock %}
+{% block content %}
+<div class="container-fluid">
+  <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <div>
+      <h2>Политика доступа: {{ magos.name if magos else 'Magos' }}</h2>
+      <p class="text-muted">Проверка реального маршрута, Cognitor-пира и nftables на выбранном Magos через mTLS.</p>
+    </div>
+    <a class="btn btn-outline-modern" href="{{ url_for('access_policies.vpn_access_policies') }}">← Политика доступа</a>
+  </div>
+  {% if problem %}
+    <div class="alert alert-danger">{{ problem }}. Изменения не выполнялись.</div>
+  {% elif result %}
+    <div class="premium-card p-4 mb-4">
+      <h5>Результат read-only проверки</h5>
+      <dl class="row">
+        <dt class="col-sm-5">Magos</dt><dd class="col-sm-7">{{ magos.name }}</dd>
+        <dt class="col-sm-5">Клиентов</dt><dd class="col-sm-7">{{ result.client_count }}</dd>
+        <dt class="col-sm-5">Защищаемых объектов</dt><dd class="col-sm-7">{{ result.target_count }}</dd>
+        <dt class="col-sm-5">Правил</dt><dd class="col-sm-7">{{ result.rule_count }}</dd>
+        <dt class="col-sm-5">Маршруты / пиры / nft syntax</dt><dd class="col-sm-7">Проверено</dd>
+        <dt class="col-sm-5">Правила изменены</dt><dd class="col-sm-7">Нет</dd>
+        <dt class="col-sm-5">Ревизия</dt><dd class="col-sm-7"><code>{{ result.revision[:16] }}…</code></dd>
+      </dl>
+      {% if enabled %}
+      <form action="{{ url_for('policy_apply.access_policy_apply', magos_id=magos_id) }}" method="post" autocomplete="off">
+        {{ confirmation.hidden_tag() }}
+        <input type="hidden" name="expected_revision" value="{{ result.revision }}">
+        <label class="form-label" for="confirmMagos">Для применения введите имя Magos</label>
+        <input class="form-control mb-3" id="confirmMagos" name="confirm_name" placeholder="{{ magos.name }}" required>
+        <button type="submit" class="btn btn-warning">Применить ACL на Magos</button>
+      </form>
+      {% else %}
+      <p class="text-warning mb-0">Рабочий Apply отключён настройками. Read-only проверка доступна; для включения нужны явные разрешения на Omnissiah и Magos после тестирования.</p>
+      {% endif %}
+    </div>
+  {% endif %}
+  {% if actual and actual.active_revision %}
+  <div class="premium-card p-4">
+    <h5>Фактически применённая ревизия</h5>
+    <p><code>{{ actual.active_revision[:16] }}…</code></p>
+    {% if actual.recovery_required %}
+      <p class="text-danger">Незавершённая транзакция. Запрещено повторять Apply до восстановления.</p>
+    {% elif actual.rollback_available and enabled %}
+      <form action="{{ url_for('policy_apply.access_policy_rollback', magos_id=magos_id) }}" method="post">
+        {{ confirmation.hidden_tag() }}
+        <input type="hidden" name="expected_revision" value="{{ actual.active_revision }}">
+        <label for="rollbackMagos" class="form-label">Подтвердите имя Magos для возврата предыдущей ACL</label>
+        <input id="rollbackMagos" name="confirm_name" class="form-control mb-3" required>
+        <button class="btn btn-outline-warning" type="submit">Откатить последнюю ACL</button>
+      </form>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
