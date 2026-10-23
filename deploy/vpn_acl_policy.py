@@ -218,6 +218,11 @@ class LinuxACL:
             raise PolicyRejected("The live ACL revision differs from the last committed snapshot")
         if (self.state / "acl-previous.json").exists():
             raise PolicyRejected("Unresolved policy transaction; recover before preview/apply")
+        # A route existing in Linux does not mean the kernel will forward
+        # packets originating from Cognitor.
+        if plan["clients"] and self._run(
+                ["sysctl", "-n", "net.ipv4.ip_forward"]).stdout.strip() != "1":
+            raise PolicyRejected("IPv4 forwarding is disabled on Magos")
         dump = self._run(["wg", "show", "wg0", "dump"]).stdout
         peers = {}
         for row in dump.splitlines()[1:]:
