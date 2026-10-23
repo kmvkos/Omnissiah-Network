@@ -12,8 +12,8 @@ from jinja2 import DictLoader
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
-from nmc_models import db, General, BaseUser
-from nmc_api.policy_apply import policy_apply_bp, build_magos_policy_plan, PolicyPlanError
+from nmc_models import db, General, BaseUser, NodeConnection
+from nmc_api.policy_apply import policy_apply_bp, build_magos_policy_plan, PolicyPlanError, inspect_cross_magos_paths
 from nmc_api.access_policies import access_policies_bp
 from vpn_cognitor_models import CognitorDraft
 from vpn_protected_models import ProtectedNetworkDraft
@@ -207,3 +207,55 @@ def test_cross_magos_preview_has_explicit_blocker_and_no_apply(site):
     # The API never claims it can enforce an unverified mesh route.
     assert "WG AllowedIPs" in text or "другим Magos" in text
     assert not any(action == "policy-apply" for _, action, _, _ in calls)
+
+
+def test_cross_magos_preview_queries_both_gated_root_sides_but_never_applies(site):
+    app, client, (_, _, mid, _, _), _ = site
+    with app.app_context():
+        source = General.query.filter_by(name="magos03").one()
+        destination = General.query.filter_by(name="magos01").one()
+        source.public_key = "B" * 43 + "="
+        destination.public_key = "C" * 43 + "="
+        ProtectedNetworkDraft.query.one().parent_magos_id = destination.id
+        db.session.add(NodeConnection(node1_id=source.id, node2_id=destination.id))
+        db.session.commit()
+        selected, plan = build_magos_policy_plan(mid)
+        sent = []
+        def probe(node, action, manifest):
+            sent.append((node.name, action, manifest))
+            return {
+                "node_name": node.name, "role": manifest["role"],
+                "required_allowed_ip": manifest["required_peer_allowed_ip"],
+                "required_route": manifest["required_route"],
+                "gateway_checks_passed": True, "blockers": [],
+                "protected_host_return_verified": False,
+                "cognitor_route_verified": False,
+                "writes_performed": False,
+            }
+        checks = inspect_cross_magos_paths(selected, plan, probe)
+        assert len(checks) == 1
+        assert checks[0]["gateway_checks_passed"] is True
+        assert [value[0] for value in sent] == ["magos03", "magos01"]
+        assert all(value[1] == "policy-path-preview" for value in sent)
+        assert sent[0][2]["required_peer_allowed_ip"] == "172.16.40.10/32"
+        assert sent[1][2]["required_peer_allowed_ip"] == "10.77.0.5/32"
+
+
+def test_cross_magos_fail_closed_when_direct_edge_is_missing(site):
+    app, client, (_, _, mid, _, _), _ = site
+    with app.app_context():
+        source = General.query.filter_by(name="magos03").one()
+        destination = General.query.filter_by(name="magos01").one()
+        source.public_key = "B" * 43 + "="
+        destination.public_key = "C" * 43 + "="
+        ProtectedNetworkDraft.query.one().parent_magos_id = destination.id
+        db.session.commit()
+        selected, plan = build_magos_policy_plan(mid)
+        calls = []
+        def forbidden(*args):
+            calls.append(args)
+            raise AssertionError("Must not query without a direct edge")
+        result = inspect_cross_magos_paths(selected, plan, forbidden)
+        assert result[0]["gateway_checks_passed"] is False
+        assert "direct mesh" in result[0]["error"]
+        assert calls == []
