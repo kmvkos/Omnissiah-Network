@@ -7,7 +7,10 @@
       <h2>Защищаемые объекты</h2>
       <p class="text-muted mb-0">Реестр IP-адресов и подсетей, доступ к которым будет регулироваться политиками Magos.</p>
     </div>
-    <a class="btn btn-outline-modern" href="{{ url_for('vpn_overview') }}">← VPN-сеть</a>
+    <div class="d-flex flex-wrap gap-2">
+      <a class="btn btn-outline-modern" href="{{ url_for('access_policies.vpn_access_policies') }}">Политики доступа</a>
+      <a class="btn btn-outline-modern" href="{{ url_for('vpn_overview') }}">← VPN-сеть</a>
+    </div>
   </div>
   <div class="alert alert-warning" role="note">
     Сейчас работает только реестр намерений: запись объекта НЕ добавляет маршруты, не открывает доступ и не устанавливает правила firewall. Защита появится только после отдельного подтверждённого применения политик.
