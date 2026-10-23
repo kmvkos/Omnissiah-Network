@@ -1,0 +1,67 @@
+{% extends 'layout.html' %}
+{% block title %}Защищаемые объекты — VPN{% endblock %}
+{% block content %}
+<div class="container-fluid">
+  <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <div>
+      <h2>Защищаемые объекты</h2>
+      <p class="text-muted mb-0">Реестр IP-адресов и подсетей, доступ к которым будет регулироваться политиками Magos.</p>
+    </div>
+    <a class="btn btn-outline-modern" href="{{ url_for('vpn_overview') }}">← VPN-сеть</a>
+  </div>
+  <div class="alert alert-warning" role="note">
+    Сейчас работает только реестр намерений: запись объекта НЕ добавляет маршруты, не открывает доступ и не устанавливает правила firewall. Защита появится только после отдельного подтверждённого применения политик.
+  </div>
+  <div class="premium-card p-4 mb-4">
+    <h5 class="mb-3">Зарегистрировать объект</h5>
+    <form action="{{ url_for('protected_objects.vpn_protected_objects') }}" method="post" class="row g-3" autocomplete="off">
+      {{ form.hidden_tag() }}
+      <div class="col-12 col-lg-6">
+        {{ form.name.label(class="form-label") }}
+        {{ form.name(class="form-control", maxlength="50", placeholder="db-production") }}
+        {% for error in form.name.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="col-12 col-lg-6">
+        {{ form.parent_magos_id.label(class="form-label") }}
+        {{ form.parent_magos_id(class="form-select") }}
+        {% for error in form.parent_magos_id.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="col-12 col-lg-6">
+        {{ form.network.label(class="form-label") }}
+        {{ form.network(class="form-control", placeholder="172.16.40.10/32") }}
+        <div class="form-text">Для отдельного хоста укажите /32; для подсети — например, 172.16.40.0/24.</div>
+        {% for error in form.network.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="col-12 col-lg-6">
+        {{ form.description.label(class="form-label") }}
+        {{ form.description(class="form-control", rows="2", maxlength="255") }}
+        {% for error in form.description.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="col-12">
+        {{ form.submit(class="btn btn-outline-modern", disabled=(not magos)) }}
+      </div>
+    </form>
+  </div>
+  <div class="premium-card p-4">
+    <h5 class="mb-3">Зарегистрированные объекты</h5>
+    <div class="table-responsive">
+      <table class="table table-dark premium-table">
+        <thead><tr><th>Название</th><th>IP / CIDR</th><th>Magos</th><th>Описание</th><th>Применение</th></tr></thead>
+        <tbody>
+        {% for obj in objects %}
+          <tr>
+            <td><strong>{{ obj.name }}</strong></td>
+            <td><code>{{ obj.network }}</code></td>
+            <td>{{ obj.parent_magos.name if obj.parent_magos else 'Неизвестен' }}</td>
+            <td>{{ obj.description or '—' }}</td>
+            <td><span class="badge bg-secondary">Только реестр</span></td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5" class="text-muted text-center">Объекты ещё не зарегистрированы</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
