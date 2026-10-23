@@ -4,8 +4,8 @@
 <div class="container-fluid">
   <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
     <div>
-      <h2>Политики доступа VPN</h2>
-      <p class="text-muted mb-0">Cognitor → защищаемый объект → протокол/порт → действие.</p>
+      <h2>Политика доступа</h2>
+      <p class="text-muted mb-0">Cognitor → защищаемый объект → протокол/порт → ACCEPT, DROP или REJECT.</p>
     </div>
     <div class="d-flex flex-wrap gap-2">
       <a class="btn btn-outline-modern" href="{{ url_for('cognitors.vpn_cognitors') }}">Клиенты Cognitor</a>
@@ -14,10 +14,9 @@
     </div>
   </div>
   <div class="alert alert-warning" role="note">
-    Это только проектирование правил. Ни разрешение, ни запрет ещё не применяются на Magos.
-    В списке источников видны и черновики Cognitor — для будущего планирования доступа.
-    Черновик Cognitor не подтверждает наличие работающего VPN.
-    До отдельного безопасного Apply политики не влияют на трафик.
+    Политики применяются на Magos через подтверждённую транзакцию nftables. Создание,
+    изменение и удаление вступают в силу только после успешной проверки и Apply.
+    Статус Cognitor в БД не заменяет проверку реального VPN-соединения.
   </div>
   {% if legacy_policy_count %}
   <div class="alert alert-warning mb-4" role="status">
@@ -26,8 +25,8 @@
   </div>
   {% endif %}
   <div class="premium-card p-4 mb-4">
-    <h5 class="mb-2">Создать правило (черновик)</h5>
-    <p class="text-muted small">На этом этапе источник — управляемый Cognitor, назначение — зарегистрированный IP или сеть за Magos. Позже добавим источники LAN и группы. Omnissiah управляет, Magos фильтрует, когда будет реализован Apply.</p>
+    <h5 class="mb-2">Создать правило доступа</h5>
+    <p class="text-muted small">Укажите источник Cognitor и ресурс. При сохранении открывается проверка перед применением на Magos.</p>
     <form action="{{ url_for('access_policies.vpn_access_policies') }}" method="post" class="row g-3" autocomplete="off">
       {{ form.hidden_tag() }}
       <div class="col-12 col-lg-6">
@@ -136,10 +135,10 @@
             </td>
             <td>{{ rule.protocol | upper }}{{ ':' ~ rule.destination_port if rule.protocol != 'icmp' else '' }}</td>
             <td>{{ 'Разрешить' if rule.decision == 'allow' else 'Запретить (DROP)' if rule.decision == 'deny' else 'Отклонить (REJECT)' }}</td>
-            <td><span class="badge bg-secondary">{{ 'Применено в последней подтверждённой операции' if rule.status == 'applied' else 'Черновик — не применено' }}</span></td>
+            <td><span class="badge bg-secondary">{{ 'Применено по последнему подтверждению' if rule.status == 'applied' else 'Ожидает удаления на Magos' if rule.status == 'pending_delete' else 'Ожидает применения' }}</span></td>
             <td>
               <a class="btn btn-sm btn-outline-modern" href="{{ url_for('access_policies.vpn_access_policy_preview', rule_id=rule.id) }}">Предпросмотр</a>
-              {% if rule.status == 'draft' %}
+              {% if rule.status in ('draft', 'applied') %}
                 <details class="mt-2">
                   <summary class="text-muted small">Редактировать</summary>
                   <form class="mt-2 d-grid gap-2"
@@ -172,13 +171,13 @@
                     <button class="btn btn-sm btn-outline-modern" type="submit">Сохранить изменения</button>
                   </form>
                   <form class="mt-2" action="{{ url_for('access_policies.delete_policy_draft', rule_id=rule.id) }}"
-                        method="post" onsubmit="return confirm('Удалить черновик? Рабочая ACL не изменится.')">
+                        method="post" onsubmit="return confirm('Удалить правило? Если оно применено, удаление вступит в силу после подтверждения на Magos.')">
                     {{ form.csrf_token }}
-                    <button class="btn btn-sm btn-outline-danger" type="submit">Удалить черновик</button>
+                    <button class="btn btn-sm btn-outline-danger" type="submit">Удалить правило</button>
                   </form>
                 </details>
               {% else %}
-                <span class="text-muted small">Изменение только через безопасную транзакцию</span>
+                <span class="text-warning small">Удаление ожидает применения</span>
               {% endif %}
             </td>
           </tr>
