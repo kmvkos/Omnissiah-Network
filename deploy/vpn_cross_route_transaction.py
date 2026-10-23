@@ -51,6 +51,9 @@ def extend_peer_config(original, public_key, cidr):
     """One-peer-only AllowedIPs append, preserving every unrelated byte of config."""
     if not original.startswith("# Managed by Omnissiah VPN v2\n"):
         raise CrossRouteError("Only Omnissiah-owned wg0.conf can be extended")
+    if any(re.fullmatch(r"\s*Table\s*=\s*off\s*(?:#.*)?", line, re.IGNORECASE)
+           for line in original.splitlines()):
+        raise CrossRouteError("wg-quick Table=off prevents persistent route restoration")
     lines = original.splitlines(keepends=True)
     sections, active = [], None
     for line_no, line in enumerate(lines):
@@ -143,8 +146,9 @@ class CrossRouteExtension:
         cidr = manifest["required_peer_allowed_ip"]
         if key not in kernel or key not in saved:
             raise CrossRouteError("Existing Magos peer must be present in kernel and wg0.conf")
-        if set(kernel[key]) != set(saved[key]):
-            raise CrossRouteError("Persisted and running peer AllowedIPs differ")
+        if set(kernel) != set(saved) or any(
+                set(kernel[k]) != set(saved[k]) for k in kernel):
+            raise CrossRouteError("Persisted and running WireGuard peer sets differ")
         if require_absent and (cidr in kernel[key] or cidr in saved[key]):
             raise CrossRouteError("Required route already exists; refuse duplicate change")
         if len(kernel[key]) > 32:
@@ -197,6 +201,8 @@ class CrossRouteExtension:
         if os.environ.get("OMNISSIAH_ENABLE_CROSS_ROUTE_APPLY") != "YES":
             raise CrossRouteError("Cross-Magos route mutations disabled by host policy")
         self._safe_paths()
+        if (self.state / LOCK).is_symlink():
+            raise CrossRouteError("Symlink route lock refused")
         with (self.state / LOCK).open("a+") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             previous = self._journal()
@@ -322,6 +328,8 @@ class CrossRouteExtension:
 
     def finalize(self, operation_id, revision):
         _uuid(operation_id)
+        if os.environ.get("OMNISSIAH_ENABLE_CROSS_ROUTE_APPLY") != "YES":
+            raise CrossRouteError("Cross-Magos route mutations disabled by host policy")
         self._safe_paths()
         with (self.state / LOCK).open("a+") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
