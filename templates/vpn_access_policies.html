@@ -97,11 +97,27 @@
     </ul>
   </div>
   {% endif %}
+  <div class="premium-card p-4 mb-4">
+    <h5 class="mb-2">Применение на Magos</h5>
+    <p class="text-muted small mb-3">
+      Выберите Magos, чтобы выполнить read-only проверку реальных пиров, маршрутов и nftables.
+      Применение требует отдельного подтверждения и разрешения на управляющем и целевом узле.
+      Пока управляемые источники — Cognitor; сети за Magos добавим отдельным этапом.
+    </p>
+    <div class="d-flex flex-wrap gap-2">
+      {% for magos in magos_nodes %}
+      <a href="{{ url_for('policy_apply.access_policy_apply_preview', magos_id=magos.id) }}"
+         class="btn btn-outline-modern">Проверить и применить: {{ magos.name }}</a>
+      {% else %}
+      <p class="text-warning mb-0">Нет зарегистрированных Magos</p>
+      {% endfor %}
+    </div>
+  </div>
   <div class="premium-card p-4">
     <h5 class="mb-3">Сохранённые правила</h5>
     <div class="table-responsive">
       <table class="table table-dark premium-table">
-        <thead><tr><th>Правило</th><th>Источник</th><th>Назначение</th><th>Протокол / порт</th><th>Решение</th><th>Состояние</th><th>Предпросмотр</th></tr></thead>
+        <thead><tr><th>Правило</th><th>Источник</th><th>Назначение</th><th>Протокол / порт</th><th>Решение</th><th>Состояние</th><th>Действия</th></tr></thead>
         <tbody>
           {% for rule in rules %}
           <tr>
@@ -120,11 +136,53 @@
             </td>
             <td>{{ rule.protocol | upper }}{{ ':' ~ rule.destination_port if rule.protocol != 'icmp' else '' }}</td>
             <td>{{ 'Разрешить' if rule.decision == 'allow' else 'Запретить' }}</td>
-            <td><span class="badge bg-secondary">Не применено</span></td>
-            <td><a class="btn btn-sm btn-outline-modern" href="{{ url_for('access_policies.vpn_access_policy_preview', rule_id=rule.id) }}">Проверить</a></td>
+            <td><span class="badge bg-secondary">{{ 'Применено в последней подтверждённой операции' if rule.status == 'applied' else 'Черновик — не применено' }}</span></td>
+            <td>
+              <a class="btn btn-sm btn-outline-modern" href="{{ url_for('access_policies.vpn_access_policy_preview', rule_id=rule.id) }}">Предпросмотр</a>
+              {% if rule.status == 'draft' %}
+                <details class="mt-2">
+                  <summary class="text-muted small">Редактировать</summary>
+                  <form class="mt-2 d-grid gap-2"
+                        action="{{ url_for('access_policies.edit_policy_draft', rule_id=rule.id) }}" method="post">
+                    {{ form.csrf_token }}
+                    <input name="name" value="{{ rule.name }}" class="form-control" aria-label="Имя правила" required>
+                    <select name="source_cognitor_id" class="form-select">
+                      {% for client in clients %}
+                      <option value="{{ client.id }}" {% if rule.source_cognitor_id == client.id %}selected{% endif %}>{{ client.name }}</option>
+                      {% endfor %}
+                    </select>
+                    <select name="target_object_id" class="form-select">
+                      {% for resource in resources %}
+                      <option value="{{ resource.id }}" {% if rule.target_object_id == resource.id %}selected{% endif %}>{{ resource.name }}</option>
+                      {% endfor %}
+                    </select>
+                    <select name="protocol" class="form-select">
+                      {% for proto in ['tcp','udp','icmp'] %}
+                      <option value="{{ proto }}" {% if rule.protocol == proto %}selected{% endif %}>{{ proto|upper }}</option>
+                      {% endfor %}
+                    </select>
+                    <input name="destination_port" class="form-control" aria-label="Порт"
+                           value="{{ rule.destination_port if rule.protocol != 'icmp' else '' }}"
+                           placeholder="Порт (пусто для ICMP)">
+                    <select name="decision" class="form-select">
+                      <option value="allow" {% if rule.decision == 'allow' %}selected{% endif %}>Разрешить</option>
+                      <option value="deny" {% if rule.decision == 'deny' %}selected{% endif %}>Запретить</option>
+                    </select>
+                    <button class="btn btn-sm btn-outline-modern" type="submit">Сохранить изменения</button>
+                  </form>
+                  <form class="mt-2" action="{{ url_for('access_policies.delete_policy_draft', rule_id=rule.id) }}"
+                        method="post" onsubmit="return confirm('Удалить черновик? Рабочая ACL не изменится.')">
+                    {{ form.csrf_token }}
+                    <button class="btn btn-sm btn-outline-danger" type="submit">Удалить черновик</button>
+                  </form>
+                </details>
+              {% else %}
+                <span class="text-muted small">Изменение только через безопасную транзакцию</span>
+              {% endif %}
+            </td>
           </tr>
           {% else %}
-          <tr><td colspan="7" class="text-muted text-center">Черновиков правил пока нет</td></tr>
+          <tr><td colspan="7" class="text-muted text-center">Правил пока нет</td></tr>
           {% endfor %}
         </tbody>
       </table>
