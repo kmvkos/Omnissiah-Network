@@ -32,8 +32,8 @@ class AccessPolicyForm(FlaskForm):
     submit = SubmitField("Сохранить черновик правила")
 
 
-@access_policies_bp.route("/access-policy", methods=["GET", "POST"])
 @access_policies_bp.route("/vpn/access-policies", methods=["GET", "POST"])
+@access_policies_bp.route("/access-policy", methods=["GET", "POST"])
 @login_required
 def vpn_access_policies():
     if current_user.role != "admin":
@@ -84,7 +84,8 @@ def vpn_access_policies():
                            clients=clients, resources=resources,
                            unresolved_clients=unresolved_clients,
                            legacy_clients=legacy_clients,
-                           legacy_policy_count=AccessPolicyRule.query.count())
+                           legacy_policy_count=AccessPolicyRule.query.count(),
+                           magos_nodes=General.query.filter_by(role="Magos").order_by(General.name).all())
 
 
 @access_policies_bp.route("/vpn/access-policies/<int:rule_id>/preview",
@@ -103,3 +104,57 @@ def vpn_access_policy_preview(rule_id):
         problem = "Не удалось подтвердить корректность сохранённого правила"
     return render_template("vpn_access_policy_preview.html", rule=rule,
                            result=result, problem=problem)
+
+
+@access_policies_bp.route("/access-policy/rules/<int:rule_id>/delete", methods=["POST"])
+@login_required
+def delete_policy_draft(rule_id):
+    """Do not remove live ACL via DB deletion; applied rules need a transaction."""
+    if current_user.role != "admin":
+        abort(403)
+    if not FlaskForm().validate_on_submit():
+        abort(400)
+    rule = db.session.get(AccessPolicyDraft, rule_id)
+    if rule is None:
+        abort(404)
+    if rule.status != "draft":
+        flash("Применённое правило нельзя удалить без транзакционного отката", "danger")
+        return redirect(url_for("access_policies.vpn_access_policies"))
+    db.session.delete(rule)
+    db.session.commit()
+    flash("Черновик правила удалён. Firewall не изменялся.", "success")
+    return redirect(url_for("access_policies.vpn_access_policies"))
+
+
+@access_policies_bp.route("/access-policy/rules/<int:rule_id>/edit", methods=["POST"])
+@login_required
+def edit_policy_draft(rule_id):
+    if current_user.role != "admin":
+        abort(403)
+    if not FlaskForm().validate_on_submit():
+        abort(400)
+    rule = db.session.get(AccessPolicyDraft, rule_id)
+    if rule is None:
+        abort(404)
+    if rule.status != "draft":
+        flash("Сначала выполните безопасный откат применённой политики", "danger")
+        return redirect(url_for("access_policies.vpn_access_policies"))
+    from flask import request
+    try:
+        fields = validate_policy(
+            name=request.form.get("name", ""),
+            source=db.session.get(CognitorDraft, int(request.form.get("source_cognitor_id", "0"))),
+            target=db.session.get(ProtectedNetworkDraft, int(request.form.get("target_object_id", "0"))),
+            protocol=request.form.get("protocol", ""),
+            port=request.form.get("destination_port", ""),
+            decision=request.form.get("decision", ""),
+            existing_rules=AccessPolicyDraft.query.filter(AccessPolicyDraft.id != rule_id).all(),
+        )
+        for key, value in fields.items():
+            setattr(rule, key, value)
+        db.session.commit()
+        flash("Черновик обновлён. Применение на Magos не выполнялось.", "success")
+    except (AccessPolicyError, IntegrityError, TypeError, ValueError):
+        db.session.rollback()
+        flash("Изменения отклонены: проверьте объекты, порт и конфликты правил", "danger")
+    return redirect(url_for("access_policies.vpn_access_policies"))
