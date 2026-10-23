@@ -39,6 +39,8 @@ class FakeCommands:
         self.calls = []
         self.allow_route = True
         self.fail_next_write = False
+        self.revision = None
+        self.forwarding = True
 
     def __call__(self, argv, *, input=None, text=None, capture_output=None, timeout=None):
         self.calls.append((tuple(argv), input))
@@ -47,10 +49,20 @@ class FakeCommands:
         if argv[:3] == ["wg", "show", "wg0"]:
             out = ("interface\\tkey\\tlisten\\tmark\\n".replace("\\t", "\t").replace("\\n", "\n")
                    + f"{KEY}\t(none)\t(none)\t10.77.0.5/32\t0\t0\t0\t0\n")
+        elif argv == ["sysctl", "-n", "net.ipv4.ip_forward"]:
+            out = "1\n" if self.forwarding else "0\n"
         elif argv[:4] == ["ip", "-j", "route", "get"]:
             out = json.dumps([{"dev": "eth1" if self.allow_route else "wg0"}])
         elif argv[:4] == ["nft", "-j", "list", "table"]:
             rc = 0 if self.present else 1
+            if self.present:
+                out = json.dumps({"nftables": [
+                    {"table": {"family": "inet", "name": mod.TABLE}},
+                    {"chain": {"name": "forward", "hook": "forward",
+                               "prio": -30, "policy": "accept"}},
+                    {"rule": {"comment": "omnissiah-rev-" + (self.revision or "0" * 64),
+                              "expr": [{"counter": {"packets": 0, "bytes": 0}}]}},
+                ]})
         elif argv[:3] == ["nft", "-c", "-f"]:
             assert "table inet omnissiah_acl_v2" in input
         elif argv[:3] == ["nft", "-f", "-"]:
@@ -59,6 +71,13 @@ class FakeCommands:
                 rc = 1
             else:
                 self.present = "add table" in input
+                if self.present:
+                    import re
+                    match = re.search(r"omnissiah-rev-([a-f0-9]{64})", input)
+                    assert match
+                    self.revision = match.group(1)
+                else:
+                    self.revision = None
         else:
             raise AssertionError("Unexpected system command " + str(argv))
         return SimpleNamespace(returncode=rc, stdout=out, stderr="mock")
@@ -128,6 +147,7 @@ def test_route_mismatch_blocks_before_nft_apply(tmp_path, monkeypatch):
     fake = FakeCommands()
     fake.allow_route = False
     monkeypatch.setenv("OMNISSIAH_ENABLE_POLICY_APPLY", "YES")
+    monkeypatch.setenv("OMNISSIAH_POLICY_RESTORE_READY", "YES")
     with pytest.raises(mod.PolicyRejected):
         engine(tmp_path, fake).preview(manifest())
     assert not fake.present
@@ -145,6 +165,7 @@ def test_policy_apply_disabled_by_default(tmp_path, monkeypatch):
 
 def test_guarded_apply_and_rollback_are_atomic(tmp_path, monkeypatch):
     monkeypatch.setenv("OMNISSIAH_ENABLE_POLICY_APPLY", "YES")
+    monkeypatch.setenv("OMNISSIAH_POLICY_RESTORE_READY", "YES")
     fake = FakeCommands()
     worker = engine(tmp_path, fake)
     revision = worker.preview(manifest())["revision"]
@@ -168,6 +189,7 @@ def test_guarded_apply_and_rollback_are_atomic(tmp_path, monkeypatch):
 
 def test_apply_failure_rolls_back_without_taking_other_tables(tmp_path, monkeypatch):
     monkeypatch.setenv("OMNISSIAH_ENABLE_POLICY_APPLY", "YES")
+    monkeypatch.setenv("OMNISSIAH_POLICY_RESTORE_READY", "YES")
     fake = FakeCommands()
     service = engine(tmp_path, fake)
     preview = service.preview(manifest())
@@ -186,3 +208,65 @@ def test_unmanaged_existing_nft_table_is_refused(tmp_path):
     with pytest.raises(mod.PolicyRejected, match="state mismatch"):
         engine(tmp_path, fake).preview(manifest())
     assert not any(cmd[:3] == ("nft", "-f", "-") for cmd, _ in fake.calls)
+
+
+def test_missing_nft_table_after_reboot_is_reported_as_drift(tmp_path, monkeypatch):
+    monkeypatch.setenv("OMNISSIAH_ENABLE_POLICY_APPLY", "YES")
+    monkeypatch.setenv("OMNISSIAH_POLICY_RESTORE_READY", "YES")
+    fake = FakeCommands()
+    worker = engine(tmp_path, fake)
+    revision = worker.preview(manifest())["revision"]
+    worker.apply(manifest(), revision=revision, operation_id=str(uuid.uuid4()))
+    fake.present = False  # Simulate reboot or manual nft flush.
+    state = worker.status()
+    assert state["drift"] is True
+    assert state["recovery_required"] is True
+    assert state["active_revision"] == revision
+    with pytest.raises(mod.PolicyRejected):
+        worker.preview(manifest())
+
+
+def test_boot_restore_recovers_last_trusted_acl_before_wg0(tmp_path, monkeypatch):
+    monkeypatch.setenv("OMNISSIAH_ENABLE_POLICY_APPLY", "YES")
+    monkeypatch.setenv("OMNISSIAH_POLICY_RESTORE_READY", "YES")
+    monkeypatch.setattr(mod.os, "geteuid", lambda: 0)
+    fake = FakeCommands()
+    worker = engine(tmp_path, fake)
+    revision = worker.preview(manifest())["revision"]
+    worker.apply(manifest(), revision=revision, operation_id=str(uuid.uuid4()))
+    fake.present = False
+    fake.revision = None
+    result = worker.restore_on_boot()
+    assert result["state"] == "restored"
+    assert fake.present is True
+    assert worker.status()["drift"] is False
+
+
+def test_cross_magos_route_not_inferred_from_wg_interface(tmp_path):
+    fake = FakeCommands()
+    plan = manifest()
+    plan["clients"][0]["targets"][0]["via_magos"] = True
+    with pytest.raises(mod.PolicyRejected, match="Cross-Magos"):
+        engine(tmp_path, fake).preview(plan)
+
+
+def test_forwarding_disabled_blocks_policy_apply(tmp_path):
+    fake = FakeCommands()
+    fake.forwarding = False
+    with pytest.raises(mod.PolicyRejected, match="forwarding"):
+        engine(tmp_path, fake).preview(manifest())
+
+
+def test_last_policy_can_be_explicitly_removed(tmp_path, monkeypatch):
+    monkeypatch.setenv("OMNISSIAH_ENABLE_POLICY_APPLY", "YES")
+    monkeypatch.setenv("OMNISSIAH_POLICY_RESTORE_READY", "YES")
+    fake = FakeCommands()
+    worker = engine(tmp_path, fake)
+    revision = worker.preview(manifest())["revision"]
+    worker.apply(manifest(), revision=revision, operation_id=str(uuid.uuid4()))
+    empty = {"node_name": "magos03", "address": "10.77.0.4/32", "clients": []}
+    next_revision = worker.preview(empty)["revision"]
+    result = worker.apply(empty, revision=next_revision, operation_id=str(uuid.uuid4()))
+    assert result["state"] == "committed"
+    assert worker.status()["active_revision"] == next_revision
+    assert "ip saddr" not in mod.nft_batch(mod.normalize(empty, "magos03"))

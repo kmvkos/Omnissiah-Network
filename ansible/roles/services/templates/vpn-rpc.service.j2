@@ -19,6 +19,9 @@ Environment="OMNISSIAH_ENABLE_ROUTE_TRANSACTIONS=YES"
 # Explicit root-side gate; read-only preview is available without opting in.
 {% if omnissiah_policy_apply_root_enabled | default(false) is sameas true %}
 Environment="OMNISSIAH_ENABLE_POLICY_APPLY=YES"
+{% if omnissiah_policy_restore_boot_enabled | default(false) is sameas true %}
+Environment="OMNISSIAH_POLICY_RESTORE_READY=YES"
+{% endif %}
 {% endif %}
 ExecStart=/usr/bin/python3 /usr/local/libexec/omnissiah-vpn-rpc
 Restart=on-failure

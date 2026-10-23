@@ -51,8 +51,8 @@ def normalize(plan, expected_node, management_addresses=()):
         raise PolicyRejected("ACL plan belongs to another Magos")
     own = _network(plan["address"], host=True)
     raw = plan["clients"]
-    if not isinstance(raw, list) or not 1 <= len(raw) <= 32:
-        raise PolicyRejected("ACL plan must contain 1-32 managed Cognitors")
+    if not isinstance(raw, list) or len(raw) > 32:
+        raise PolicyRejected("ACL plan supports up to 32 managed Cognitors")
     management = []
     for addr in management_addresses:
         try:
@@ -135,6 +135,7 @@ def nft_batch(plan, *, replace=False):
     lines.append(f"add table inet {TABLE}")
     lines.append(
         f"add chain inet {TABLE} forward {{ type filter hook forward priority -30; policy accept; }}")
+    lines.append(f'add rule inet {TABLE} forward counter comment "omnissiah-rev-{digest(plan)}"')
     for client in plan["clients"]:
         source = str(ip_interface(client["address"]).ip)
         for target in client["targets"]:
@@ -166,9 +167,32 @@ class LinuxACL:
             raise PolicyRejected("Read-only preflight or nft operation failed")
         return res
 
-    def _table_present(self):
+    def _runtime(self):
         result = self._run(["nft", "-j", "list", "table", "inet", TABLE], fail=False)
-        return result.returncode == 0
+        if result.returncode:
+            return None
+        try:
+            entries = json.loads(result.stdout)["nftables"]
+            # JSON netlink exposes a rule comment at rule["comment"],
+            # not as a match expression in rule["expr"].
+            comments = [item["rule"]["comment"] for item in entries
+                        if "rule" in item and "comment" in item["rule"]]
+            chains = [item["chain"] for item in entries if "chain" in item]
+            if (len(chains) != 1 or chains[0].get("name") != "forward"
+                    or chains[0].get("hook") != "forward"
+                    or chains[0].get("prio") != -30
+                    or chains[0].get("policy") != "accept"):
+                raise PolicyRejected("Unexpected ACL chain ownership or priority")
+            revisions = [c.removeprefix("omnissiah-rev-") for c in comments
+                         if c.startswith("omnissiah-rev-")]
+            if len(revisions) != 1 or not re.fullmatch(r"[a-f0-9]{64}", revisions[0]):
+                raise PolicyRejected("Missing or ambiguous ACL runtime revision")
+            return revisions[0]
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            raise PolicyRejected("Could not verify live nftables ACL ownership") from exc
+
+    def _table_present(self):
+        return self._run(["nft", "-j", "list", "table", "inet", TABLE], fail=False).returncode == 0
 
     def _active(self):
         file = self.state / "acl-active.json"
@@ -190,6 +214,15 @@ class LinuxACL:
         present = self._table_present()
         if bool(previous) != present:
             raise PolicyRejected("Existing nft ACL/table state mismatch; manual reconciliation required")
+        if previous and self._runtime() != previous["digest"]:
+            raise PolicyRejected("The live ACL revision differs from the last committed snapshot")
+        if (self.state / "acl-previous.json").exists():
+            raise PolicyRejected("Unresolved policy transaction; recover before preview/apply")
+        # A route existing in Linux does not mean the kernel will forward
+        # packets originating from Cognitor.
+        if plan["clients"] and self._run(
+                ["sysctl", "-n", "net.ipv4.ip_forward"]).stdout.strip() != "1":
+            raise PolicyRejected("IPv4 forwarding is disabled on Magos")
         dump = self._run(["wg", "show", "wg0", "dump"]).stdout
         peers = {}
         for row in dump.splitlines()[1:]:
@@ -200,6 +233,10 @@ class LinuxACL:
             if client["address"] not in peers.get(client["public_key"], set()):
                 raise PolicyRejected("Cognitor peer is not installed with expected /32 route")
             for target in client["targets"]:
+                if target["via_magos"]:
+                    # Source-only wg0 route cannot prove that the peer accepts
+                    # the target or that a return route exists. Block, don't guess.
+                    raise PolicyRejected("Cross-Magos requires verified bidirectional WireGuard routes")
                 dst = ip_network(target["network"])
                 address = dst.network_address
                 if dst.prefixlen < 32:
@@ -220,15 +257,19 @@ class LinuxACL:
 
     def status(self):
         active = self._active()
-        if bool(active) != self._table_present():
-            raise PolicyRejected("Policy state drift requires manual recovery")
+        present = self._table_present()
+        runtime = self._runtime() if present else None
+        drift = (bool(active) != present
+                 or (active is not None and runtime != active["digest"]))
         rollback_file = self.state / "acl-rollback.json"
         recovery = self.state / "acl-previous.json"
         return {
             "active_revision": active["digest"] if active else None,
-            "rollback_available": bool(active) and rollback_file.is_file()
+            "rollback_available": bool(active) and not drift and rollback_file.is_file()
                                   and not rollback_file.is_symlink() and not recovery.exists(),
-            "recovery_required": recovery.exists(),
+            "recovery_required": recovery.exists() or drift,
+            "runtime_revision": runtime,
+            "drift": drift,
             "writes_performed": False,
         }
 
@@ -260,6 +301,8 @@ class LinuxACL:
     def apply(self, raw, *, revision, operation_id):
         if os.environ.get("OMNISSIAH_ENABLE_POLICY_APPLY") != "YES":
             raise PolicyRejected("ACL apply disabled by host installation policy")
+        if os.environ.get("OMNISSIAH_POLICY_RESTORE_READY") != "YES":
+            raise PolicyRejected("ACL boot recovery is not configured")
         try:
             uid = uuid.UUID(operation_id)
             if uid.version != 4 or str(uid) != operation_id:
@@ -282,6 +325,8 @@ class LinuxACL:
             self._atomic(marker, json.dumps({"operation_id": operation_id, "previous": previous}))
             try:
                 self._run(["nft", "-f", "-"], input=nft_batch(plan, replace=present))
+                if self._runtime() != digest(plan):
+                    raise PolicyRejected("Live nftables revision not verified after Apply")
                 self._atomic(self.state / "acl-active.json",
                              json.dumps({"plan": plan, "digest": digest(plan)}, sort_keys=True))
                 self._atomic(self.state / "acl-rollback.json",
@@ -301,6 +346,43 @@ class LinuxACL:
                 except Exception as rollback_error:
                     raise PolicyRejected("ACL rollback failed; manual recovery required") from rollback_error
                 raise PolicyRejected("ACL apply failed; previous managed policy restored") from exc
+
+
+    def restore_on_boot(self):
+        """Install last committed ACL before wg-quick can bring the tunnel up.
+
+        Never invent policy on boot. Journal drift is a blocking error. This
+        operation is intended only for the root-only systemd boot unit.
+        """
+        if os.geteuid() != 0:
+            raise PolicyRejected("Boot restoration requires root")
+        self.state.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with (self.state / "acl.lock").open("a+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            if (self.state / "acl-previous.json").exists():
+                raise PolicyRejected("Incomplete ACL operation; boot restore refused")
+            active = self._active()
+            if active is None:
+                if self._table_present():
+                    raise PolicyRejected("Unmanaged ACL table exists; refusing takeover")
+                return {"state": "no_policy", "writes_performed": False}
+            verified = normalize(active["plan"], self.node_name, self.protected_ips)
+            if digest(verified) != active["digest"]:
+                raise PolicyRejected("Untrusted ACL snapshot")
+            runtime = self._runtime() if self._table_present() else None
+            if runtime is not None and runtime != active["digest"]:
+                raise PolicyRejected("Live policy conflict during boot restore")
+            if runtime == active["digest"]:
+                return {"state": "already_installed", "revision": active["digest"],
+                        "writes_performed": False}
+            # This is the only safe time to restore from a trusted snapshot:
+            # wg0 has not yet been made available by the guarded systemd unit.
+            self._run(["nft", "-c", "-f", "-"], input=nft_batch(verified))
+            self._run(["nft", "-f", "-"], input=nft_batch(verified))
+            if self._runtime() != active["digest"]:
+                raise PolicyRejected("Boot ACL installation not verified")
+            return {"state": "restored", "revision": active["digest"],
+                    "writes_performed": True}
 
     def rollback(self, *, revision, operation_id):
         """Explicitly restore the last root-saved policy snapshot, no arbitrary input."""
@@ -347,6 +429,8 @@ class LinuxACL:
                 else:
                     self._run(["nft", "-f", "-"],
                               input=nft_batch(previous["plan"], replace=True))
+                    if self._runtime() != previous["digest"]:
+                        raise PolicyRejected("Previous ACL was not restored in kernel")
                     self._atomic(self.state / "acl-active.json", json.dumps(previous))
                     self._atomic(rollback_path,
                                  json.dumps({"commit": previous["digest"], "previous": current}))
