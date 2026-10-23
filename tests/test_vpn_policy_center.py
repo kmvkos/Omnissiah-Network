@@ -67,7 +67,7 @@ def site(tmp_path, monkeypatch):
             status="applied")
         resource = ProtectedNetworkDraft(
             name="app-db", network="172.16.40.10/32",
-            parent_magos_id=magos01.id, status="inventory_only",
+            parent_magos_id=magos03.id, status="inventory_only",
             description="Lab DB")
         db.session.add_all([client, resource])
         db.session.flush()
@@ -118,7 +118,7 @@ def test_policy_plan_uses_managed_cognitor_and_destination_owner(site):
         node, plan = build_magos_policy_plan(magos_id)
         assert node.name == "magos03"
         assert plan["clients"][0]["name"] == "cognitor01"
-        assert plan["clients"][0]["targets"][0]["via_magos"] is True
+        assert plan["clients"][0]["targets"][0]["via_magos"] is False
         assert plan["clients"][0]["targets"][0]["network"] == "172.16.40.10/32"
     assert calls == []
 
@@ -192,3 +192,18 @@ def test_legacy_record_does_not_enter_policy_plan(site):
         _, plan = build_magos_policy_plan(mid)
         assert len(plan["clients"]) == 1
         assert plan["clients"][0]["name"] == "cognitor01"
+
+
+def test_cross_magos_preview_has_explicit_blocker_and_no_apply(site):
+    app, client, (admin, _, mid, _, _), calls = site
+    with app.app_context():
+        owner = General.query.filter_by(name="magos01").one()
+        target = ProtectedNetworkDraft.query.one()
+        target.parent_magos_id = owner.id
+        db.session.commit()
+    login(client, admin)
+    response = client.get(f"/access-policy/apply/{mid}/preview")
+    text = response.get_data(as_text=True)
+    # The API never claims it can enforce an unverified mesh route.
+    assert "WG AllowedIPs" in text or "другим Magos" in text
+    assert not any(action == "policy-apply" for _, action, _, _ in calls)
