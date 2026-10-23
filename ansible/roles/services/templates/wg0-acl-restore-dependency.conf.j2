@@ -1,0 +1,4 @@
+[Unit]
+# Do not activate systemd-managed wg0 before the committed ACL is restored.
+Requires=omnissiah-acl-restore.service
+After=omnissiah-acl-restore.service
