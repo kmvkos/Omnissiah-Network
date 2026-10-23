@@ -94,7 +94,7 @@ def test_old_editor_redirects_to_single_v2_ui(web, old_url):
     login(client, admin)
     response = client.get(old_url)
     assert response.status_code == 302
-    assert response.headers["Location"].endswith("/vpn/access-policies")
+    assert response.headers["Location"].endswith("/access-policy")
     assert effects == []
 
 

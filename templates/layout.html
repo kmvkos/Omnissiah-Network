@@ -1324,17 +1324,28 @@ select.form-control-modern {
                             <span>VPN-сеть</span>
                         </a>
                     </div>
-                    <div class="nav-item">
-                        <a href="{{ url_for('access_policies.vpn_access_policies') }}" class="nav-link {% if request.endpoint in ('access_policies.vpn_access_policies', 'access_policies.vpn_access_policy_preview') %}active{% endif %}">
-                            <i class="bi bi-shield-check"></i>
-                            <span>Политики доступа VPN v2</span>
-                        </a>
-                    </div>
+
 
 
 
                 </div>
                 {% endif %}
+
+                <div class="nav-section">
+                    <div class="nav-section-title">Политика доступа</div>
+                    <div class="nav-item">
+                        <a href="{{ url_for('access_policies.vpn_access_policies') }}" class="nav-link {% if request.endpoint in ('access_policies.vpn_access_policies', 'access_policies.vpn_access_policy_preview') %}active{% endif %}">
+                            <i class="bi bi-shield-lock"></i>
+                            <span>Политика доступа</span>
+                        </a>
+                    </div>
+                    <div class="nav-item">
+                        <a href="{{ url_for('protected_objects.vpn_protected_objects') }}" class="nav-link {% if request.endpoint == 'protected_objects.vpn_protected_objects' %}active{% endif %}">
+                            <i class="bi bi-hdd-network"></i>
+                            <span>Защищаемые объекты</span>
+                        </a>
+                    </div>
+                </div>
 
                 <div class="nav-section">
                     <div class="nav-section-title">Устаревшие модули</div>

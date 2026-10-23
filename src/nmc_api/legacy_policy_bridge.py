@@ -29,6 +29,7 @@ def retire_legacy_policy_entrypoints():
     if current_user.role != "admin":
         abort(403)
     if is_editor and request.method == "GET":
+        # Canonical, independent policy-management page (not VPN overview).
         return redirect(url_for("access_policies.vpn_access_policies"), code=302)
     if is_api:
         # Fail closed for both old write and read endpoints. The new read-only

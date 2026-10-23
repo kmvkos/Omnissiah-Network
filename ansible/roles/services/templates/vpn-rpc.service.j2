@@ -16,6 +16,10 @@ Environment="OMNISSIAH_PROTECTED_MANAGEMENT_IPV4={{ ([hostvars[groups.omnissiah[
 Environment="OMNISSIAH_ENABLE_ROUTE_TRANSACTIONS=YES"
 {% endif %}
 
+# Explicit root-side gate; read-only preview is available without opting in.
+{% if omnissiah_policy_apply_root_enabled | default(false) is sameas true %}
+Environment="OMNISSIAH_ENABLE_POLICY_APPLY=YES"
+{% endif %}
 ExecStart=/usr/bin/python3 /usr/local/libexec/omnissiah-vpn-rpc
 Restart=on-failure
 RestartSec=2
