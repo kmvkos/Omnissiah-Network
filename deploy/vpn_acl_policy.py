@@ -82,8 +82,16 @@ def normalize(plan, expected_node, management_addresses=()):
             raise PolicyRejected("Cognitor must have 1-32 target resources")
         seen_targets, out_targets = set(), []
         for target in targets:
-            if not isinstance(target, dict) or set(target) != {"network", "via_magos", "rules"}:
+            if not isinstance(target, dict) or set(target) not in (
+                    {"network", "via_magos", "rules"},
+                    {"network", "via_magos", "rules", "route_peer_public_key"}):
                 raise PolicyRejected("Invalid target resource")
+            if ("route_peer_public_key" in target) != (target.get("via_magos") is True):
+                raise PolicyRejected("Remote target needs authenticated Magos identity")
+            if "route_peer_public_key" in target and (
+                    not isinstance(target["route_peer_public_key"], str)
+                    or not PUBLIC_KEYS.fullmatch(target["route_peer_public_key"])):
+                raise PolicyRejected("Invalid Magos public key")
             dst = _network(target["network"])
             cidr = str(dst)
             if (cidr in seen_targets or source.ip in dst or own.ip in dst
@@ -113,8 +121,11 @@ def normalize(plan, expected_node, management_addresses=()):
                 seen_match.add(match)
                 out_rules.append({"protocol": proto, "port": port, "decision": decision})
                 entries += 1
-            out_targets.append({"network": cidr, "via_magos": target["via_magos"],
-                                "rules": sorted(out_rules, key=lambda r: (r["protocol"], r["port"]))})
+            item = {"network": cidr, "via_magos": target["via_magos"],
+                    "rules": sorted(out_rules, key=lambda r: (r["protocol"], r["port"]))}
+            if target["via_magos"]:
+                item["route_peer_public_key"] = target["route_peer_public_key"]
+            out_targets.append(item)
         normalized.append({"name": name, "address": str(source), "public_key": key,
                            "targets": sorted(out_targets, key=lambda t: t["network"])})
     if entries > 256:
@@ -218,6 +229,18 @@ class LinuxACL:
             raise PolicyRejected("The live ACL revision differs from the last committed snapshot")
         if (self.state / "acl-previous.json").exists():
             raise PolicyRejected("Unresolved policy transaction; recover before preview/apply")
+        # Route and ACL use separate workers. Never check/apply ACL while
+        # the current Magos has an unfinished distributed WG route operation.
+        cross_journal = self.state / "cross-route-operation.json"
+        if cross_journal.is_symlink():
+            raise PolicyRejected("Unsafe cross-route journal")
+        if cross_journal.exists():
+            try:
+                cross_record = json.loads(cross_journal.read_text())
+                if cross_record.get("state") not in ("finished", "reverted"):
+                    raise PolicyRejected("Cross-Magos route transaction is unresolved")
+            except (ValueError, OSError, AttributeError) as exc:
+                raise PolicyRejected("Unreadable cross-Magos route journal") from exc
         # A route existing in Linux does not mean the kernel will forward
         # packets originating from Cognitor.
         if plan["clients"] and self._run(
@@ -234,9 +257,18 @@ class LinuxACL:
                 raise PolicyRejected("Cognitor peer is not installed with expected /32 route")
             for target in client["targets"]:
                 if target["via_magos"]:
-                    # Source-only wg0 route cannot prove that the peer accepts
-                    # the target or that a return route exists. Block, don't guess.
-                    raise PolicyRejected("Cross-Magos requires verified bidirectional WireGuard routes")
+                    key = target["route_peer_public_key"]
+                    routed = ip_network(target["network"])
+                    if key == client["public_key"]:
+                        raise PolicyRejected("Remote peer conflicts with Cognitor key")
+                    owned = peers.get(key, set())
+                    if str(routed) not in owned:
+                        raise PolicyRejected("Remote Magos AllowedIPs not installed")
+                    for other_key, prefixes in peers.items():
+                        if other_key != key and any(
+                                routed.overlaps(ip_network(prefix))
+                                for prefix in prefixes if prefix not in ("", "(none)")):
+                            raise PolicyRejected("Another WireGuard peer captures target CIDR")
                 dst = ip_network(target["network"])
                 address = dst.network_address
                 if dst.prefixlen < 32:

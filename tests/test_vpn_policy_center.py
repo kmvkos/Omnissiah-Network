@@ -16,7 +16,7 @@ from nmc_models import db, General, BaseUser, NodeConnection
 from nmc_api.policy_apply import policy_apply_bp, build_magos_policy_plan, PolicyPlanError, inspect_cross_magos_paths
 from nmc_api.access_policies import access_policies_bp
 from nmc_api.cross_routes import cross_route_bp
-from vpn_cross_route_models import CrossRouteOperation
+from vpn_cross_route_models import CrossRouteOperation, CrossRouteLease
 from vpn_cognitor_models import CognitorDraft
 from vpn_protected_models import ProtectedNetworkDraft
 from vpn_access_policy_models import AccessPolicyDraft
@@ -203,12 +203,13 @@ def test_cross_magos_preview_has_explicit_blocker_and_no_apply(site):
         owner = General.query.filter_by(name="magos01").one()
         target = ProtectedNetworkDraft.query.one()
         target.parent_magos_id = owner.id
+        owner.public_key = "C"*43+"="
         db.session.commit()
     login(client, admin)
     response = client.get(f"/access-policy/apply/{mid}/preview")
     text = response.get_data(as_text=True)
     # The API never claims it can enforce an unverified mesh route.
-    assert "WG AllowedIPs" in text or "другим Magos" in text
+    assert "маршруты" in text or "транзакцию" in text
     assert not any(action == "policy-apply" for _, action, _, _ in calls)
 
 
@@ -338,3 +339,73 @@ def test_distributed_route_apply_journaled_before_writes(site, monkeypatch):
         assert operation.state == "committed"
         assert operation.source_revision == "a"*64
         assert operation.destination_revision == "a"*64
+
+
+def test_cross_magos_acl_preview_after_committed_bilateral_path(site, monkeypatch):
+    app, client, (admin, _, mid, cid, _), calls = site
+    with app.app_context():
+        source = General.query.filter_by(name="magos03").one()
+        dest = General.query.filter_by(name="magos01").one()
+        source.public_key = "B"*43+"="
+        dest.public_key = "C"*43+"="
+        obj = ProtectedNetworkDraft.query.one()
+        obj.parent_magos_id = dest.id
+        db.session.add(NodeConnection(node1_id=source.id, node2_id=dest.id))
+        db.session.add(CrossRouteOperation(
+            operation_id="00000000-0000-4000-8000-000000000001",
+            source_magos_id=source.id, destination_magos_id=dest.id,
+            cognitor_id=cid, object_id=obj.id, state="committed",
+            source_revision="a"*64, destination_revision="b"*64))
+        db.session.commit()
+    original_send = sys.modules["app"]._vpn_v2_send
+    def send(node, action, plan=None, operation_id=None):
+        if action == "policy-path-preview":
+            return {"node_name": node.name,
+                    "role": plan["role"], "required_route": plan["required_route"],
+                    "required_allowed_ip": plan["required_peer_allowed_ip"],
+                    "gateway_checks_passed": True, "writes_performed": False,
+                    "blockers": [], "protected_host_return_verified": False,
+                    "cognitor_route_verified": False}
+        return original_send(node, action, plan, operation_id)
+    monkeypatch.setattr(sys.modules["app"], "_vpn_v2_send", send)
+    login(client, admin)
+    response = client.get(f"/access-policy/apply/{mid}/preview")
+    assert response.status_code == 200
+    assert "a"*64 in response.get_data(as_text=True)
+    with app.app_context():
+        _, plan = build_magos_policy_plan(mid)
+        target = plan["clients"][0]["targets"][0]
+        assert target["via_magos"] is True
+        assert target["route_peer_public_key"] == "C"*43+"="
+    monkeypatch.setenv("VPN_POLICY_APPLY_ENABLED", "YES")
+    csrf = token(client, mid)
+    reply = client.post(f"/access-policy/apply/{mid}", data={
+        "csrf_token": csrf, "confirm_name": "magos03",
+        "expected_revision": "a"*64})
+    assert reply.status_code == 302
+    assert any(x[1] == "policy-apply" for x in calls)
+
+
+def test_cross_magos_acl_denied_while_route_lease_unresolved(site, monkeypatch):
+    app, client, (admin, _, mid, cid, _), calls = site
+    with app.app_context():
+        source = General.query.filter_by(name="magos03").one()
+        dest = General.query.filter_by(name="magos01").one()
+        source.public_key = "B"*43+"="
+        dest.public_key = "C"*43+"="
+        obj = ProtectedNetworkDraft.query.one()
+        obj.parent_magos_id = dest.id
+        db.session.add(NodeConnection(node1_id=source.id, node2_id=dest.id))
+        db.session.add(CrossRouteLease(
+            node_id=source.id,
+            operation_id="00000000-0000-4000-8000-000000000002"))
+        db.session.commit()
+    login(client, admin)
+    monkeypatch.setenv("VPN_POLICY_APPLY_ENABLED", "YES")
+    csrf = token(client, mid)
+    before = len(calls)
+    reply = client.post(f"/access-policy/apply/{mid}", data={
+        "csrf_token": csrf, "confirm_name": "magos03",
+        "expected_revision": "a"*64})
+    assert reply.status_code == 302
+    assert all(x[1] != "policy-apply" for x in calls[before:])

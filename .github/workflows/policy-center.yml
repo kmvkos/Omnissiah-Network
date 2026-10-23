@@ -44,6 +44,27 @@ jobs:
           python-version: '3.12'
       - name: Dependencies
         run: python -m pip install -r requirements.txt pytest
+      - name: Install real nftables syntax checker
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq nftables
+      - name: Validate generated ACL against actual nftables parser (no kernel mutation)
+        run: |
+          python - <<'PY'
+          from deploy.vpn_acl_policy import nft_batch, normalize
+          plan = {"node_name": "magos03", "address": "10.77.0.4/32",
+                  "clients": [{"name": "cognitor01", "address": "10.77.0.5/32",
+                              "public_key": "A" * 43 + "=",
+                              "targets": [{"network": "192.165.42.2/32",
+                                           "via_magos": True,
+                                           "route_peer_public_key": "B" * 43 + "=",
+                                           "rules": [
+                                               {"protocol": "tcp", "port": 22, "decision": "allow"},
+                                               {"protocol": "tcp", "port": 3389, "decision": "deny"},
+                                               {"protocol": "udp", "port": 53, "decision": "reject"},
+                                               {"protocol": "icmp", "port": 0, "decision": "allow"}]}]}]}
+          with open("/tmp/omnissiah-policy.nft", "w") as fp:
+              fp.write(nft_batch(normalize(plan, "magos03")))
+          PY
+          sudo nft --check --file /tmp/omnissiah-policy.nft
       - name: Compile server/client modules
         run: python -m compileall -q src/nmc_api/access_policies.py src/nmc_api/policy_apply.py deploy/vpn_acl_policy.py deploy/vpn_cross_path_probe.py deploy/vpn_cross_route_transaction.py src/vpn_cross_magos_plan.py src/vpn_cross_route_coordinator.py src/nmc_api/cross_routes.py deploy/vpn_rpc.py agents/app/agent.py agents/app/vpn_client.py
       - name: Test isolated NFT transaction and policies

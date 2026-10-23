@@ -3120,6 +3120,18 @@ def vpn_mesh_operation():
     node = db.session.get(General, body["node_id"])
     if not node or node.role != "Magos":
         return jsonify(error="Magos not found"), 404
+    if action in ("start", "prepare", "apply", "route-transaction"):
+        # A host-only Mesh reprojection cannot silently discard the route
+        # extensions owned by committed Cognitor access policies.
+        from vpn_cross_route_models import CrossRouteOperation, CrossRouteLease
+        if CrossRouteLease.query.filter_by(node_id=node.id).first():
+            return jsonify(error="Magos has an unresolved access-route transaction"), 409
+        if (CrossRouteOperation.query.filter(
+                CrossRouteOperation.state == "committed",
+                (CrossRouteOperation.source_magos_id == node.id)
+                | (CrossRouteOperation.destination_magos_id == node.id)
+                ).first()):
+            return jsonify(error="Mesh changes require policy route reconciliation first"), 409
     if action in ("start", "apply", "route-transaction") and request.headers.get("X-VPN-Explicit-Apply") != "ENABLE_TEST_MESH":
         return jsonify(error="Explicit lab activation acknowledgement required"), 409
     try:

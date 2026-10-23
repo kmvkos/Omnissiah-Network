@@ -41,6 +41,7 @@ class FakeCommands:
         self.fail_next_write = False
         self.revision = None
         self.forwarding = True
+        self.remote_route = False
 
     def __call__(self, argv, *, input=None, text=None, capture_output=None, timeout=None):
         self.calls.append((tuple(argv), input))
@@ -49,10 +50,13 @@ class FakeCommands:
         if argv[:3] == ["wg", "show", "wg0"]:
             out = ("interface\\tkey\\tlisten\\tmark\\n".replace("\\t", "\t").replace("\\n", "\n")
                    + f"{KEY}\t(none)\t(none)\t10.77.0.5/32\t0\t0\t0\t0\n")
+            if self.remote_route:
+                out += f"{KEY2}\t(none)\t(none)\t10.77.0.2/32,172.16.40.10/32\t0\t0\t0\t0\n"
         elif argv == ["sysctl", "-n", "net.ipv4.ip_forward"]:
             out = "1\n" if self.forwarding else "0\n"
         elif argv[:4] == ["ip", "-j", "route", "get"]:
-            out = json.dumps([{"dev": "eth1" if self.allow_route else "wg0"}])
+            out = json.dumps([{"dev": ("wg0" if self.remote_route else
+                                       "eth1" if self.allow_route else "wg0")}])
         elif argv[:4] == ["nft", "-j", "list", "table"]:
             rc = 0 if self.present else 1
             if self.present:
@@ -246,7 +250,7 @@ def test_cross_magos_route_not_inferred_from_wg_interface(tmp_path):
     fake = FakeCommands()
     plan = manifest()
     plan["clients"][0]["targets"][0]["via_magos"] = True
-    with pytest.raises(mod.PolicyRejected, match="Cross-Magos"):
+    with pytest.raises(mod.PolicyRejected, match="authenticated Magos"):
         engine(tmp_path, fake).preview(plan)
 
 
@@ -270,3 +274,28 @@ def test_last_policy_can_be_explicitly_removed(tmp_path, monkeypatch):
     assert result["state"] == "committed"
     assert worker.status()["active_revision"] == next_revision
     assert "ip saddr" not in mod.nft_batch(mod.normalize(empty, "magos03"))
+
+
+def test_cross_magos_enforcement_checks_expected_peer_and_wg_route(tmp_path):
+    plan = manifest()
+    target = plan["clients"][0]["targets"][0]
+    target["via_magos"] = True
+    target["route_peer_public_key"] = KEY2
+    fake = FakeCommands()
+    with pytest.raises(mod.PolicyRejected, match="AllowedIPs"):
+        engine(tmp_path, fake).preview(plan)
+    fake.remote_route = True
+    verified = engine(tmp_path, fake).preview(plan)
+    assert verified["route_preflight_ok"] is True
+    assert verified["writes_performed"] is False
+    assert "iifname \"wg0\"" in mod.nft_batch(mod.normalize(plan, "magos03"))
+    target["route_peer_public_key"] = KEY
+    with pytest.raises(mod.PolicyRejected):
+        engine(tmp_path, fake).preview(plan)
+
+
+def test_cross_magos_cannot_omit_authenticated_peer_key():
+    plan = manifest()
+    plan["clients"][0]["targets"][0]["via_magos"] = True
+    with pytest.raises(mod.PolicyRejected, match="authenticated Magos"):
+        mod.normalize(plan, "magos03")

@@ -134,6 +134,55 @@ def test_route_to_local_underlay_is_not_accepted(config):
     assert result["gateway_checks_passed"] is False
 
 
+
+@pytest.mark.parametrize("failure", ["no_route", "empty_json", "plain_text", "missing_device"])
+def test_missing_source_forward_route_is_diagnostic_not_rpc_error(config, failure):
+    plan = manifest()
+    class BrokenSource(Observe):
+        def __call__(self, cmd, **kwargs):
+            if (cmd[:5] == ["ip", "-j", "-4", "route", "get"]
+                    and cmd[5] == "192.165.42.2"):
+                self.calls.append(tuple(cmd))
+                if failure == "no_route":
+                    return Obj(returncode=2, stdout="", stderr="Network is unreachable")
+                if failure == "empty_json":
+                    return Obj(returncode=0, stdout="[]", stderr="")
+                if failure == "missing_device":
+                    return Obj(returncode=0, stdout='[{"dst":"192.165.42.2"}]', stderr="")
+                return Obj(returncode=0, stdout="192.165.42.2 via default", stderr="")
+            return super().__call__(cmd, **kwargs)
+    outcome = make_probe(plan, config, BrokenSource()).check(plan)
+    assert outcome["writes_performed"] is False
+    assert outcome["gateway_checks_passed"] is False
+    assert any("route to 192.165.42.2/32" in text for text in outcome["blockers"])
+
+
+def test_destination_missing_return_route_becomes_blocker(config):
+    plan = manifest("destination")
+    config.write_text(persisted("destination"))
+    class MissingReturn(Observe):
+        def __call__(self, cmd, **kwargs):
+            if (cmd[:5] == ["ip", "-j", "-4", "route", "get"]
+                    and cmd[5] == "10.77.0.5"):
+                return Obj(returncode=2, stdout="", stderr="No route")
+            return super().__call__(cmd, **kwargs)
+    result = make_probe(plan, config, MissingReturn("destination")).check(plan)
+    assert result["gateway_checks_passed"] is False
+    assert any("route to 10.77.0.5/32" in msg for msg in result["blockers"])
+
+
+def test_management_route_query_failure_is_safe_blocker(config):
+    plan = manifest()
+    class MissingManagement(Observe):
+        def __call__(self, cmd, **kwargs):
+            if cmd == ["ip", "-j", "-4", "route", "get", "192.168.32.167"]:
+                return Obj(returncode=2, stdout="", stderr="No route")
+            return super().__call__(cmd, **kwargs)
+    result = make_probe(plan, config, MissingManagement()).check(plan)
+    assert result["gateway_checks_passed"] is False
+    assert any("Management/underlay" in msg for msg in result["blockers"])
+
+
 def test_foreign_or_unsafe_plan_never_calls_kernel(config):
     runner = Observe()
     invalid = manifest()
