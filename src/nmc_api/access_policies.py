@@ -29,7 +29,7 @@ class AccessPolicyForm(FlaskForm):
     decision = SelectField("Решение", choices=[
         ("allow", "Разрешить"), ("deny", "Запретить (DROP)"), ("reject", "Отклонить (REJECT)")
     ], validators=[DataRequired()])
-    submit = SubmitField("Сохранить черновик правила")
+    submit = SubmitField("Создать и проверить правило")
 
 
 @access_policies_bp.route("/vpn/access-policies", methods=["GET", "POST"])
@@ -73,8 +73,10 @@ def vpn_access_policies():
             )
             db.session.add(AccessPolicyDraft(**rule, status="draft"))
             db.session.commit()
-            flash("Правило сохранено как черновик. На Magos ничего не применялось.", "success")
-            return redirect(url_for("access_policies.vpn_access_policies"))
+            flash("Правило создано. Проверьте реальный путь и подтвердите применение.", "success")
+            source = by_client[form.source_cognitor_id.data]
+            return redirect(url_for("policy_apply.access_policy_apply_preview",
+                                    magos_id=source.parent_magos_id))
         except (AccessPolicyError, IntegrityError) as exc:
             db.session.rollback()
             flash(str(exc) if isinstance(exc, AccessPolicyError)
@@ -109,7 +111,7 @@ def vpn_access_policy_preview(rule_id):
 @access_policies_bp.route("/access-policy/rules/<int:rule_id>/delete", methods=["POST"])
 @login_required
 def delete_policy_draft(rule_id):
-    """Do not remove live ACL via DB deletion; applied rules need a transaction."""
+    """Mark applied rules for transactional removal; delete only pending ones."""
     if current_user.role != "admin":
         abort(403)
     if not FlaskForm().validate_on_submit():
@@ -117,12 +119,18 @@ def delete_policy_draft(rule_id):
     rule = db.session.get(AccessPolicyDraft, rule_id)
     if rule is None:
         abort(404)
-    if rule.status != "draft":
-        flash("Применённое правило нельзя удалить без транзакционного отката", "danger")
+    if rule.status == "pending_delete":
+        flash("Удаление уже ожидает применения.", "warning")
         return redirect(url_for("access_policies.vpn_access_policies"))
+    source_node = rule.source_cognitor.parent_magos_id
+    if rule.status == "applied":
+        rule.status = "pending_delete"
+        db.session.commit()
+        flash("Удаление запланировано. Оно вступит в силу только после Apply.", "warning")
+        return redirect(url_for("policy_apply.access_policy_apply_preview", magos_id=source_node))
     db.session.delete(rule)
     db.session.commit()
-    flash("Черновик правила удалён. Firewall не изменялся.", "success")
+    flash("Неприменённое правило удалено из списка.", "success")
     return redirect(url_for("access_policies.vpn_access_policies"))
 
 
@@ -136,8 +144,8 @@ def edit_policy_draft(rule_id):
     rule = db.session.get(AccessPolicyDraft, rule_id)
     if rule is None:
         abort(404)
-    if rule.status != "draft":
-        flash("Сначала выполните безопасный откат применённой политики", "danger")
+    if rule.status == "pending_delete":
+        flash("Правило ожидает удаления. Сначала завершите или отмените изменение.", "danger")
         return redirect(url_for("access_policies.vpn_access_policies"))
     from flask import request
     try:
@@ -150,10 +158,17 @@ def edit_policy_draft(rule_id):
             decision=request.form.get("decision", ""),
             existing_rules=AccessPolicyDraft.query.filter(AccessPolicyDraft.id != rule_id).all(),
         )
+        old_parent = rule.source_cognitor.parent_magos_id
+        new_source = db.session.get(CognitorDraft, fields["source_cognitor_id"])
+        if rule.status == "applied" and new_source.parent_magos_id != old_parent:
+            raise AccessPolicyError("Нельзя переносить применённое правило между Magos")
         for key, value in fields.items():
             setattr(rule, key, value)
+        rule.status = "draft"
         db.session.commit()
-        flash("Черновик обновлён. Применение на Magos не выполнялось.", "success")
+        flash("Изменение сохранено. На Magos действует предыдущая версия до Apply.", "warning")
+        return redirect(url_for("policy_apply.access_policy_apply_preview",
+                                magos_id=new_source.parent_magos_id))
     except (AccessPolicyError, IntegrityError, TypeError, ValueError):
         db.session.rollback()
         flash("Изменения отклонены: проверьте объекты, порт и конфликты правил", "danger")
