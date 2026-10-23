@@ -21,7 +21,7 @@ def process(message):
     if not isinstance(message, dict):
         raise ValueError("Expected JSON object")
     verb = message.get("action")
-    if verb not in ("identity", "status", "prepare", "start", "apply", "route-preview", "route-transaction", "transaction-status", "cognitor-preview", "cognitor-add", "policy-preview", "policy-apply", "policy-status", "policy-rollback", "policy-path-preview"):
+    if verb not in ("identity", "status", "prepare", "start", "apply", "route-preview", "route-transaction", "transaction-status", "cognitor-preview", "cognitor-add", "policy-preview", "policy-apply", "policy-status", "policy-rollback", "policy-path-preview", "route-ext-prepare", "route-ext-commit", "route-ext-revert", "route-ext-finalize"):
         raise ValueError("Unknown operation")
     if set(message) - {"action", "node_name", "plan", "operation_id"}:
         raise ValueError("Unknown fields")
@@ -35,13 +35,13 @@ def process(message):
     if not expected or node_name != expected:
         raise ValueError("Node mismatch")
     plan = message.get("plan")
-    if verb in ("prepare", "apply", "route-preview", "route-transaction", "cognitor-preview", "cognitor-add", "policy-preview", "policy-apply", "policy-rollback", "policy-path-preview"):
+    if verb in ("prepare", "apply", "route-preview", "route-transaction", "cognitor-preview", "cognitor-add", "policy-preview", "policy-apply", "policy-rollback", "policy-path-preview", "route-ext-prepare", "route-ext-commit", "route-ext-revert", "route-ext-finalize"):
         if not isinstance(plan, dict):
             raise ValueError("Plan required")
     elif plan is not None:
         raise ValueError("Unexpected plan")
     operation_id = message.get("operation_id")
-    if verb in ("route-transaction", "cognitor-add", "policy-apply", "policy-rollback"):
+    if verb in ("route-transaction", "cognitor-add", "policy-apply", "policy-rollback", "route-ext-prepare", "route-ext-commit", "route-ext-revert", "route-ext-finalize"):
         from vpn_operation_fence import OperationRejected, validate_operation_id
         try:
             validate_operation_id(operation_id)
@@ -49,11 +49,30 @@ def process(message):
             raise ValueError("Invalid operation UUIDv4") from exc
     elif operation_id is not None:
         raise ValueError("Unexpected operation ID")
+    if verb in ("route-ext-prepare", "route-ext-commit", "route-ext-revert", "route-ext-finalize"):
+        from vpn_cross_route_transaction import CrossRouteExtension
+        trusted = os.environ.get("OMNISSIAH_PROTECTED_MANAGEMENT_IPV4", "").split(",")
+        transaction = CrossRouteExtension(node_name, trusted)
+        if verb == "route-ext-prepare":
+            return transaction.prepare(plan, operation_id)
+        if (not isinstance(plan, dict)
+                or set(plan) != {"node_name", "address", "revision"}
+                or plan["node_name"] != node_name
+                or not isinstance(plan["revision"], str)):
+            raise ValueError("Invalid route transaction confirmation")
+        import re
+        if not re.fullmatch(r"[a-f0-9]{64}", plan["revision"]):
+            raise ValueError("Invalid route revision")
+        if verb == "route-ext-commit":
+            return transaction.commit(operation_id, plan["revision"])
+        if verb == "route-ext-revert":
+            return transaction.revert(operation_id, plan["revision"])
+        return transaction.finalize(operation_id, plan["revision"])
     if verb == "policy-path-preview":
         from vpn_cross_path_probe import LinuxCrossPathProbe
         protected = os.environ.get("OMNISSIAH_PROTECTED_MANAGEMENT_IPV4", "").split(",")
         return LinuxCrossPathProbe(node_name, protected).check(plan)
-    if verb in ("policy-preview", "policy-apply", "policy-status", "policy-rollback", "policy-path-preview"):
+    if verb in ("policy-preview", "policy-apply", "policy-status", "policy-rollback", "policy-path-preview", "route-ext-prepare", "route-ext-commit", "route-ext-revert", "route-ext-finalize"):
         from vpn_acl_policy import LinuxACL
         protected = os.environ.get("OMNISSIAH_PROTECTED_MANAGEMENT_IPV4", "").split(",")
         service = LinuxACL(node_name=node_name, protected_ips=protected)
