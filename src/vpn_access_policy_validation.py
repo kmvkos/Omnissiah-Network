@@ -36,8 +36,8 @@ def validate_policy(*, name, source, target, protocol, port, decision, existing_
         raise AccessPolicyError("Не указан Magos, владеющий ресурсом")
     if protocol not in ("tcp", "udp", "icmp"):
         raise AccessPolicyError("Разрешены только TCP, UDP или ICMP")
-    if decision not in ("allow", "deny"):
-        raise AccessPolicyError("Решение должно быть allow или deny")
+    if decision not in ("allow", "deny", "reject")
+        raise AccessPolicyError("Решение должно быть allow, deny или reject")
     if not isinstance(port, str):
         raise AccessPolicyError("Некорректный порт")
     port = port.strip()
