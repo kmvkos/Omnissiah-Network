@@ -1,0 +1,31 @@
+{% extends 'layout.html' %}
+{% block title %}Предпросмотр политики доступа — VPN{% endblock %}
+{% block content %}
+<div class="container-fluid">
+  <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <h2>Предпросмотр: {{ rule.name }}</h2>
+    <a class="btn btn-outline-modern" href="{{ url_for('access_policies.vpn_access_policies') }}">← К правилам</a>
+  </div>
+  <div class="alert alert-warning">
+    <strong>Только чтение.</strong> Это не проверка доступности сети и не подтверждение применения firewall.
+    Никакие операции на Magos не выполнялись.
+  </div>
+  {% if problem %}
+  <div class="alert alert-danger">{{ problem }}. Правило не готово к применению.</div>
+  {% elif result %}
+  <div class="premium-card p-4">
+    <dl class="row">
+      <dt class="col-sm-4">Источник</dt><dd class="col-sm-8">{{ result.source }} ({{ result.source_address }})</dd>
+      <dt class="col-sm-4">Назначение</dt><dd class="col-sm-8">{{ result.destination }} ({{ result.destination_network }})</dd>
+      <dt class="col-sm-4">Протокол / порт</dt><dd class="col-sm-8">{{ result.protocol }}{{ ':' ~ result.port if result.port is not none else '' }}</dd>
+      <dt class="col-sm-4">Решение</dt><dd class="col-sm-8">{{ 'Разрешить' if result.decision == 'allow' else 'Запретить' }}</dd>
+      <dt class="col-sm-4">Разные Magos</dt><dd class="col-sm-8">{{ 'Да — нужна маршрутизация туда и обратно' if result.cross_magos else 'Нет' }}</dd>
+      <dt class="col-sm-4">Маршрут проверен</dt><dd class="col-sm-8">Нет</dd>
+      <dt class="col-sm-4">Firewall применён</dt><dd class="col-sm-8">Нет</dd>
+      <dt class="col-sm-4">Изменения на узлах</dt><dd class="col-sm-8">0</dd>
+    </dl>
+    <p class="text-warning mb-0">Применение пока заблокировано. Следующий этап: read-only проверка пути, затем nftables Apply / Verify / Rollback.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
