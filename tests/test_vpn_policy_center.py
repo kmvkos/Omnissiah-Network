@@ -14,6 +14,7 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 from nmc_models import db, General, BaseUser
 from nmc_api.policy_apply import policy_apply_bp, build_magos_policy_plan, PolicyPlanError
+from nmc_api.access_policies import access_policies_bp
 from vpn_cognitor_models import CognitorDraft
 from vpn_protected_models import ProtectedNetworkDraft
 from vpn_access_policy_models import AccessPolicyDraft
@@ -44,6 +45,7 @@ def site(tmp_path, monkeypatch):
         return db.session.get(BaseUser, int(uid))
 
     app.register_blueprint(policy_apply_bp)
+    app.register_blueprint(access_policies_bp)
     with app.app_context():
         db.create_all()
         admin = BaseUser(email="admin", password_hash="test", role="admin")
