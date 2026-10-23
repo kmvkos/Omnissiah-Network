@@ -63,14 +63,14 @@ def plan_cross_magos(client, resource, magos, edges):
         "resource_cidr": str(dest),
     }
     source_plan = {
-        **common, "node_name": source.name, "role": "source",
+        **common, "node_name": source.name, "address": source.ip_pool, "role": "source",
         "own_vpn_cidr": source_net, "peer_name": target.name,
         "peer_public_key": target.public_key, "peer_vpn_cidr": target_net,
         "required_peer_allowed_ip": str(dest),
         "required_route": str(dest),
     }
     dest_plan = {
-        **common, "node_name": target.name, "role": "destination",
+        **common, "node_name": target.name, "address": target.ip_pool, "role": "destination",
         "own_vpn_cidr": target_net, "peer_name": source.name,
         "peer_public_key": source.public_key, "peer_vpn_cidr": source_net,
         "required_peer_allowed_ip": client_net,
