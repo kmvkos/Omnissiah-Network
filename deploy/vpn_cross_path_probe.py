@@ -22,7 +22,7 @@ class CrossPathCheckError(ValueError):
 
 def validate(plan, node_name, trusted_addresses):
     fields = {
-        "client_cidr", "client_public_key", "resource_cidr", "node_name",
+        "client_cidr", "client_public_key", "resource_cidr", "node_name", "address",
         "role", "own_vpn_cidr", "peer_name", "peer_public_key",
         "peer_vpn_cidr", "required_peer_allowed_ip", "required_route",
     }
@@ -39,6 +39,8 @@ def validate(plan, node_name, trusted_addresses):
     try:
         client = ip_interface(plan["client_cidr"])
         own = ip_interface(plan["own_vpn_cidr"])
+        if plan["address"] != plan["own_vpn_cidr"]:
+            raise CrossPathCheckError("Installed Magos address mismatch")
         peer = ip_interface(plan["peer_vpn_cidr"])
         resource = ip_network(plan["resource_cidr"], strict=True)
         needed = ip_network(plan["required_peer_allowed_ip"], strict=True)
