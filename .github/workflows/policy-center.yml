@@ -34,4 +34,4 @@ jobs:
       - name: Compile server/client modules
         run: python -m compileall -q src/nmc_api/access_policies.py src/nmc_api/policy_apply.py deploy/vpn_acl_policy.py deploy/vpn_rpc.py agents/app/agent.py agents/app/vpn_client.py
       - name: Test isolated NFT transaction and policies
-        run: python -m pytest -q tests/test_vpn_acl_policy.py tests/test_vpn_access_policies.py tests/test_vpn_policy_legacy_bridge.py tests/test_vpn_cognitor_blueprint.py tests/test_vpn_protected_objects.py
+        run: python -m pytest -q tests/test_vpn_acl_policy.py tests/test_vpn_policy_center.py tests/test_vpn_access_policies.py tests/test_vpn_policy_legacy_bridge.py tests/test_vpn_cognitor_blueprint.py tests/test_vpn_protected_objects.py
