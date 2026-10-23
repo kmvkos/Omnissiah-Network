@@ -11,6 +11,7 @@ from .traffic import traffic_bp
 from .cognitors import cognitors_bp
 from .protected_objects import protected_objects_bp
 from .access_policies import access_policies_bp
+from .legacy_policy_bridge import legacy_policy_bridge_bp
 
 # Список всех Blueprints для регистрации
 api_blueprints = [
@@ -20,7 +21,8 @@ api_blueprints = [
     traffic_bp,
     cognitors_bp,
     protected_objects_bp,
-    access_policies_bp
+    access_policies_bp,
+    legacy_policy_bridge_bp
 ]
 
 __all__ = [
@@ -31,5 +33,6 @@ __all__ = [
     'cognitors_bp',
     'protected_objects_bp',
     'access_policies_bp',
+    'legacy_policy_bridge_bp',
     'api_blueprints'
 ]
