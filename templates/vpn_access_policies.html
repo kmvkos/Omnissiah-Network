@@ -11,6 +11,8 @@
   </div>
   <div class="alert alert-warning" role="note">
     Это только проектирование правил. Ни разрешение, ни запрет ещё не применяются на Magos.
+    В списке источников видны и черновики Cognitor — для будущего планирования доступа.
+    Черновик Cognitor не подтверждает наличие работающего VPN.
     До отдельного безопасного Apply политики не влияют на трафик.
   </div>
   <div class="premium-card p-4 mb-4">
@@ -48,11 +50,40 @@
       <div class="col-12">
         {{ form.submit(class="btn btn-outline-modern", disabled=(not clients or not resources)) }}
         {% if not clients or not resources %}
-          <span class="text-warning small ms-2">Нужен применённый Cognitor и хотя бы один защищаемый объект.</span>
+          <span class="text-warning small ms-2">Нужна запись Cognitor в новом реестре и хотя бы один защищаемый объект.</span>
         {% endif %}
       </div>
     </form>
   </div>
+  {% if not clients %}
+  <div class="alert alert-warning" role="status">
+    Нет клиентов в управляемом реестре Cognitor.
+    <a href="{{ url_for('cognitors.vpn_cognitors') }}">Проверьте регистрацию и статус клиентов</a>.
+    Не создавайте дубликат клиента, если его WireGuard уже работает: сначала проверьте состояние Magos и БД Omnissiah.
+  </div>
+  {% endif %}
+  {% if unresolved_clients %}
+  <div class="premium-card p-4 mb-4">
+    <h5>Клиенты с неподдерживаемым состоянием</h5>
+    <p class="text-warning">Эти записи видны, но недоступны для создания политики до проверки состояния.</p>
+    <ul class="mb-0">
+      {% for client in unresolved_clients %}
+      <li>{{ client.name }} — {{ client.status }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  {% if legacy_clients %}
+  <div class="premium-card p-4 mb-4">
+    <h5>Клиенты старого реестра (только чтение)</h5>
+    <p class="text-warning">Эти клиенты хранятся в General(role=Cognitor), а не в безопасном реестре VPN v2. Привязывать к ним новые правила без сверки нельзя — никаких автоматических импортов или повторного Apply.</p>
+    <ul class="mb-0">
+      {% for client in legacy_clients %}
+      <li>{{ client.name }} — VPN: {{ client.ip_pool }}; родитель: {{ client.parent.name if client.parent else 'не установлен' }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
   <div class="premium-card p-4">
     <h5 class="mb-3">Сохранённые правила</h5>
     <div class="table-responsive">
