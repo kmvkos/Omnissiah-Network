@@ -192,3 +192,23 @@ def edit_policy_draft(rule_id):
         db.session.rollback()
         flash("Изменения отклонены: проверьте объекты, порт и конфликты правил", "danger")
     return redirect(url_for("access_policies.vpn_access_policies"))
+
+
+@access_policies_bp.route("/access-policy/rules/<int:rule_id>/cancel-delete", methods=["POST"])
+@login_required
+def cancel_policy_delete(rule_id):
+    """Restore desired policy intent, without claiming the kernel already matches."""
+    if current_user.role != "admin":
+        abort(403)
+    if not FlaskForm().validate_on_submit():
+        abort(400)
+    rule = db.session.get(AccessPolicyDraft, rule_id)
+    if rule is None:
+        abort(404)
+    if rule.status != "pending_delete":
+        flash("Правило не ожидает удаления.", "warning")
+        return redirect(url_for("access_policies.vpn_access_policies"))
+    rule.status = "draft"
+    db.session.commit()
+    flash("Удаление отменено; необходимо подтвердить фактическую ACL на Magos.", "success")
+    return redirect(url_for("access_policies.vpn_access_policies"))
