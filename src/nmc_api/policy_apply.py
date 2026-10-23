@@ -34,8 +34,8 @@ def build_magos_policy_plan(magos_id):
     all_rules = AccessPolicyDraft.query.order_by(AccessPolicyDraft.id).all()
     registered = {c.id: c for c in clients}
     source_ids = {r.source_cognitor_id for r in all_rules if r.source_cognitor_id in registered}
-    if not source_ids:
-        raise PolicyPlanError("Нет правил для клиентов этого Magos")
+    # No desired rules is a valid (explicit) snapshot: it removes the
+    # previous filter while preserving the dedicated nftables table.
     resources = {obj.id: obj for obj in ProtectedNetworkDraft.query.all()}
     entries = defaultdict(lambda: defaultdict(list))
     for rule in all_rules:
@@ -44,8 +44,10 @@ def build_magos_policy_plan(magos_id):
         client = registered[rule.source_cognitor_id]
         if client.status != "applied":
             raise PolicyPlanError("У Cognitor есть правило, но применение его WireGuard-пира не подтверждено")
-        if rule.status not in ("draft", "applied"):
+        if rule.status not in ("draft", "applied", "pending_delete"):
             raise PolicyPlanError("Обнаружено неизвестное состояние политики")
+        if rule.status == "pending_delete":
+            continue
         obj = resources.get(rule.target_object_id)
         if obj is None or obj.status != "inventory_only":
             raise PolicyPlanError("Защищаемый объект отсутствует или требует проверки")
@@ -153,7 +155,10 @@ def access_policy_apply(magos_id):
     client_ids = {c.id for c in CognitorDraft.query.filter_by(parent_magos_id=magos_id).all()}
     for rule in rules:
         if rule.source_cognitor_id in client_ids:
-            rule.status = "applied"
+            if rule.status == "pending_delete":
+                db.session.delete(rule)
+            else:
+                rule.status = "applied"
     try:
         db.session.commit()
     except Exception:
@@ -201,8 +206,12 @@ def access_policy_rollback(magos_id):
         flash("Итог отката не подтверждён. Не повторяйте без проверки Magos. UUID: "
               + operation_id, "danger")
         return redirect(url_for("policy_apply.access_policy_apply_preview", magos_id=magos_id))
-    # A rollback can restore another revision: do not claim per-rule statuses
-    # until a desired-vs-actual reconciliation exists.
-    flash("На Magos восстановлена предыдущая ACL. Статусы отдельных правил "
-          "в БД требуют сверки с фактической ревизией.", "warning")
+    # Do not leave stale green 'applied' badges after rollback.
+    clients = CognitorDraft.query.filter_by(parent_magos_id=magos_id).all()
+    ids = {c.id for c in clients}
+    for rule in AccessPolicyDraft.query.all():
+        if rule.source_cognitor_id in ids:
+            rule.status = "draft"
+    db.session.commit()
+    flash("Предыдущая ACL восстановлена. Желаемые правила требуют сверки и повторного применения.", "warning")
     return redirect(url_for("policy_apply.access_policy_apply_preview", magos_id=magos_id))
