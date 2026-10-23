@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nmc_models import db, BaseUser, AccessPolicyRule
 from nmc_api.legacy_policy_bridge import legacy_policy_bridge_bp
+from nmc_api.access_policies import access_policies_bp
 
 
 @pytest.fixture
@@ -35,9 +36,8 @@ def web(tmp_path):
     def load_user(uid):
         return db.session.get(BaseUser, int(uid))
 
-    @app.route("/vpn/access-policies")
-    def new_v2_index():
-        return "VPN v2 safely available"
+    # Register the real endpoint so the redirect verifies blueprint wiring.
+    app.register_blueprint(access_policies_bp)
 
     effects = []
 
