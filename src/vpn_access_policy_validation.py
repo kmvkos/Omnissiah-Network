@@ -13,8 +13,11 @@ class AccessPolicyError(ValueError):
 def validate_policy(*, name, source, target, protocol, port, decision, existing_rules):
     if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,49}", name):
         raise AccessPolicyError("Имя правила: латиница, цифры, _ или -, максимум 50 символов")
-    if source is None or getattr(source, "status", None) != "applied":
-        raise AccessPolicyError("Выберите Cognitor, применённый на Magos")
+    # A policy draft is only an intention. Pending managed Cognitors are
+    # valid sources for designing one; enforcement must later require a
+    # confirmed mTLS ACK and a separate live preflight.
+    if source is None or getattr(source, "status", None) not in ("draft", "applied"):
+        raise AccessPolicyError("Выберите Cognitor из управляемого реестра (черновик или применённый)")
     if target is None or getattr(target, "status", None) != "inventory_only":
         raise AccessPolicyError("Выберите зарегистрированный защищаемый объект")
     if type(getattr(source, "id", None)) is not int or type(getattr(target, "id", None)) is not int:
@@ -84,6 +87,8 @@ def preview_policy(rule):
     return {
         "source": source.name,
         "source_address": source.vpn_address,
+        "source_registration_status": source.status,
+        "source_prepared": source.status == "applied",
         "source_magos_id": source.parent_magos_id,
         "destination": target.name,
         "destination_network": target.network,

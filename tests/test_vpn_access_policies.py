@@ -50,7 +50,8 @@ def test_valid_tcp_udp_and_icmp():
 @pytest.mark.parametrize("override", [
     {"name": "../danger"},
     {"source": None},
-    {"source": SimpleNamespace(**{**SOURCE.__dict__, "status": "draft"})},
+    {"source": SimpleNamespace(**{**SOURCE.__dict__, "status": "revoked"})},
+    {"source": SimpleNamespace(**{**SOURCE.__dict__, "status": "unknown"})},
     {"target": None},
     {"target": SimpleNamespace(**{**TARGET.__dict__, "status": "changed"})},
     {"protocol": "any"},
@@ -70,6 +71,19 @@ def test_valid_tcp_udp_and_icmp():
 def test_reject_unsafe_or_ambiguous_policy(override):
     with pytest.raises(AccessPolicyError):
         build(**override)
+
+
+def test_draft_client_may_be_selected_for_draft_policy_but_never_for_apply():
+    pending = SimpleNamespace(**{**SOURCE.__dict__, "status": "draft"})
+    assert build(source=pending)["source_cognitor_id"] == pending.id
+    rule = SimpleNamespace(
+        name="pending-ssh", source_cognitor=pending, target_object=TARGET,
+        protocol="tcp", destination_port=22, decision="allow", status="draft")
+    preview = preview_policy(rule)
+    assert preview["source_registration_status"] == "draft"
+    assert preview["source_prepared"] is False
+    assert preview["apply_available"] is False
+    assert preview["writes_performed"] is False
 
 
 def test_preview_never_claims_effective_enforcement():
@@ -104,7 +118,9 @@ def web(tmp_path):
             "{{ form.source_cognitor_id() }}{{ form.target_object_id() }}"
             "{{ form.protocol() }}{{ form.destination_port() }}"
             "{{ form.decision() }}</form>"
-            "{% for rule in rules %}{{ rule.name }}|{{ rule.status }}{% endfor %}",
+            "{% for rule in rules %}{{ rule.name }}|{{ rule.status }}{% endfor %}"
+            "{% for item in legacy_clients %}{{ item.name }}{% endfor %}"
+            "{% for item in unresolved_clients %}{{ item.status }}{% endfor %}",
         "vpn_access_policy_preview.html":
             "{% if result %}{{ result.result }}|{{ result.cross_magos }}"
             "|{{ result.apply_available }}|{{ result.writes_performed }}"
@@ -235,13 +251,56 @@ def test_forged_source_or_unsafe_port_rejected(web):
         assert AccessPolicyDraft.query.count() == 0
 
 
-def test_only_applied_cognitor_can_be_source(web):
+def test_pending_cognitor_visible_and_policy_is_draft_only(web):
     app, client, ids = web
     login(client, ids[0])
     with app.app_context():
         registered = db.session.get(CognitorDraft, ids[2])
         registered.status = "draft"
         db.session.commit()
+    listing = client.get("/vpn/access-policies").get_data(as_text=True)
+    assert "черновик, применение не подтверждено в БД" in listing
+    assert submit(client, ids).status_code == 302
+    with app.app_context():
+        saved = AccessPolicyDraft.query.one()
+        assert saved.status == "draft"
+        preview_id = saved.id
+    response = client.get(f"/vpn/access-policies/{preview_id}/preview")
+    assert response.status_code == 200
+    assert "inventory_only|True|False|False" in response.get_data(as_text=True)
+
+
+def test_legacy_cognitor_is_visible_diagnostic_but_never_persisted_as_policy(web):
+    app, client, ids = web
+    login(client, ids[0])
+    with app.app_context():
+        magos = General.query.filter_by(name="magos03").one()
+        legacy = General(
+            name="legacy-cognitor", role="Cognitor",
+            parent_id=magos.id, ip_pool="10.77.0.10/32",
+            endpoint="192.168.32.190", listen_port=51820,
+            private_key="", public_key="")
+        db.session.add(legacy)
+        db.session.commit()
+        legacy_id = legacy.id
+    page = client.get("/vpn/access-policies").get_data(as_text=True)
+    # Template fixture below exposes diagnostic legacy entries, never as a select option.
+    assert "legacy-cognitor" in page
+    assert f'value="{legacy_id}"' not in page.split("</select>")[0]
+    assert submit(client, ids, source_cognitor_id=str(legacy_id)).status_code == 200
+    with app.app_context():
+        assert AccessPolicyDraft.query.count() == 0
+
+
+def test_unknown_cognitor_state_displayed_but_not_selectable(web):
+    app, client, ids = web
+    login(client, ids[0])
+    with app.app_context():
+        registered = db.session.get(CognitorDraft, ids[2])
+        registered.status = "recovery_required"
+        db.session.commit()
+    page = client.get("/vpn/access-policies").get_data(as_text=True)
+    assert "recovery_required" in page
     assert submit(client, ids).status_code == 200
     with app.app_context():
         assert AccessPolicyDraft.query.count() == 0

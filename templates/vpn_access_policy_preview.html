@@ -16,6 +16,7 @@
   <div class="premium-card p-4">
     <dl class="row">
       <dt class="col-sm-4">Источник</dt><dd class="col-sm-8">{{ result.source }} ({{ result.source_address }})</dd>
+      <dt class="col-sm-4">Регистрация клиента</dt><dd class="col-sm-8">{{ 'Применён (в БД, факт туннеля отдельно)' if result.source_prepared else 'Черновик — не подтверждено применение на Magos' }}</dd>
       <dt class="col-sm-4">Назначение</dt><dd class="col-sm-8">{{ result.destination }} ({{ result.destination_network }})</dd>
       <dt class="col-sm-4">Протокол / порт</dt><dd class="col-sm-8">{{ result.protocol }}{{ ':' ~ result.port if result.port is not none else '' }}</dd>
       <dt class="col-sm-4">Решение</dt><dd class="col-sm-8">{{ 'Разрешить' if result.decision == 'allow' else 'Запретить' }}</dd>
