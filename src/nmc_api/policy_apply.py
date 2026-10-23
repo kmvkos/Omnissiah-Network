@@ -96,6 +96,11 @@ def access_policy_apply_preview(magos_id):
             actual = None
         node, plan = build_magos_policy_plan(magos_id)
         count = sum(len(t["rules"]) for c in plan["clients"] for t in c["targets"])
+        if any(t["via_magos"] for c in plan["clients"] for t in c["targets"]):
+            raise PolicyPlanError(
+                "Ресурс расположен за другим Magos. Не подтверждены маршруты "
+                "и WG AllowedIPs туда/обратно; применение заблокировано, "
+                "чтобы не нарушить работающий Mesh.")
         from app import _vpn_v2_send
         result = _vpn_v2_send(node, "policy-preview", plan)
         if (not isinstance(result, dict)
@@ -105,6 +110,8 @@ def access_policy_apply_preview(magos_id):
                 or len(result["revision"]) != 64):
             result = None
             problem = "Magos вернул непроверенный результат"
+    except PolicyPlanError as exc:
+        problem = str(exc)
     except Exception:
         LOG.warning("VPN ACL preview rejected for magos_id=%s", magos_id, exc_info=True)
         problem = "Проверка на Magos не пройдена: проверьте WireGuard, маршруты и nftables"
