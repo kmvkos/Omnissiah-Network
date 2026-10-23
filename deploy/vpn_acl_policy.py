@@ -32,9 +32,11 @@ def _network(value, *, host=False):
         raise PolicyRejected("Invalid network in policy plan") from exc
     if n.version != 4 or (host and n.network.prefixlen != 32):
         raise PolicyRejected("Only IPv4 and /32 client addresses supported")
-    if n.ip.is_multicast or n.ip.is_loopback or n.ip.is_unspecified if host else (
-            n.is_multicast or n.is_loopback or n.is_link_local or n.prefixlen == 0
-            or n.is_reserved):
+    unsafe = ((n.ip.is_multicast or n.ip.is_loopback or n.ip.is_unspecified)
+              if host else
+              (n.is_multicast or n.is_loopback or n.is_link_local
+               or n.prefixlen == 0 or n.is_reserved))
+    if unsafe:
         raise PolicyRejected("Unsafe address in policy plan")
     return n
 
@@ -267,6 +269,8 @@ class LinuxACL:
                 self._run(["nft", "-f", "-"], input=nft_batch(plan, replace=present))
                 self._atomic(self.state / "acl-active.json",
                              json.dumps({"plan": plan, "digest": digest(plan)}, sort_keys=True))
+                self._atomic(self.state / "acl-rollback.json",
+                             json.dumps({"commit": digest(plan), "previous": previous}))
                 marker.unlink()
                 return {"state": "committed", "revision": digest(plan), "operation_id": operation_id}
             except Exception as exc:
@@ -282,3 +286,60 @@ class LinuxACL:
                 except Exception as rollback_error:
                     raise PolicyRejected("ACL rollback failed; manual recovery required") from rollback_error
                 raise PolicyRejected("ACL apply failed; previous managed policy restored") from exc
+
+    def rollback(self, *, revision, operation_id):
+        """Explicitly restore the last root-saved policy snapshot, no arbitrary input."""
+        if os.environ.get("OMNISSIAH_ENABLE_POLICY_APPLY") != "YES":
+            raise PolicyRejected("ACL rollback disabled by host installation policy")
+        try:
+            parsed = uuid.UUID(operation_id)
+            if parsed.version != 4 or str(parsed) != operation_id:
+                raise ValueError
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise PolicyRejected("Canonical UUIDv4 required") from exc
+        self.state.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with (self.state / "acl.lock").open("a+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            if (self.state / "acl-previous.json").exists():
+                raise PolicyRejected("Unresolved transaction must be recovered first")
+            current = self._active()
+            if not current or current["digest"] != revision or not self._table_present():
+                raise PolicyRejected("Stale rollback revision or missing live ACL table")
+            rollback_path = self.state / "acl-rollback.json"
+            if not rollback_path.is_file() or rollback_path.is_symlink():
+                raise PolicyRejected("No trusted rollback snapshot")
+            try:
+                stored = json.loads(rollback_path.read_text())
+                if stored["commit"] != revision:
+                    raise ValueError
+                previous = stored["previous"]
+                if previous is not None:
+                    restored = normalize(previous["plan"], self.node_name,
+                                         self.protected_ips)
+                    if digest(restored) != previous["digest"]:
+                        raise ValueError
+                    self._verify(restored)
+            except (ValueError, TypeError, KeyError, PolicyRejected) as exc:
+                raise PolicyRejected("Invalid/stale policy rollback snapshot") from exc
+            self._atomic(self.state / "acl-previous.json",
+                         json.dumps({"operation_id": operation_id, "previous": current}))
+            try:
+                if previous is None:
+                    self._run(["nft", "-f", "-"], input=f"delete table inet {TABLE}\\n")
+                    (self.state / "acl-active.json").unlink()
+                    rollback_path.unlink()
+                    new_revision = None
+                else:
+                    self._run(["nft", "-f", "-"],
+                              input=nft_batch(previous["plan"], replace=True))
+                    self._atomic(self.state / "acl-active.json", json.dumps(previous))
+                    self._atomic(rollback_path,
+                                 json.dumps({"commit": previous["digest"], "previous": current}))
+                    new_revision = previous["digest"]
+                (self.state / "acl-previous.json").unlink()
+                return {"state": "rolled_back", "revision": new_revision,
+                        "operation_id": operation_id}
+            except Exception as exc:
+                # If rollback itself fails, root guard remains and blocks Apply.
+                raise PolicyRejected("Rollback outcome unknown; manual recovery required") from exc
+
