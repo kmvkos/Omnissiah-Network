@@ -312,8 +312,9 @@ def test_distributed_route_apply_journaled_before_writes(site, monkeypatch):
         if action == "route-ext-prepare":
             with app.app_context():
                 # Persist an operation fence before the very first RPC.
+                expected = "preparing" if node.name == "magos03" else "prepared"
                 assert CrossRouteOperation.query.filter_by(
-                    operation_id=operation_id, state="preparing").count() == 1
+                    operation_id=operation_id, state=expected).count() == 1
             return {"state": "prepared", "revision": "a"*64, "operation_id": operation_id}
         if action == "route-ext-commit":
             return {"state": "committed", "revision": plan["revision"],
