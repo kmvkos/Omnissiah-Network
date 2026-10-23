@@ -394,13 +394,18 @@ def prevent_legacy_mesh_writes_over_cognitor():
     if type(node_id) is not int:
         return None
     try:
+        # A timed-out cognitor-add may have succeeded on Magos while the DB
+        # still says 'draft'.  Until the result is reconciled, a Mesh-only
+        # write can delete the actual client peer.  All registrations block
+        # this legacy mutation path, not only confirmed 'applied' entries.
         has_clients = CognitorDraft.query.filter_by(
-            parent_magos_id=node_id, status="applied").first() is not None
+            parent_magos_id=node_id).first() is not None
     except Exception:
         import logging
         logging.getLogger(__name__).exception("Cognitor safety interlock unavailable")
         return jsonify(error="Статус Cognitor недоступен, Mesh Apply заблокирован"), 503
     if has_clients:
-        return jsonify(error="На Magos есть управляемые Cognitor. "
-                       "Mesh Apply/транзакция не должны удалять клиентские пиры."), 409
+        return jsonify(error="На Magos зарегистрирован Cognitor. Даже черновик может "
+                       "иметь неопределённый результат Apply. Старый Mesh Apply "
+                       "заблокирован до безопасной сверки состояния."), 409
     return None
