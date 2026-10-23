@@ -83,8 +83,15 @@ def build_magos_policy_plan(magos_id):
 def access_policy_apply_preview(magos_id):
     if current_user.role != "admin":
         abort(403)
-    result, problem, node, count = None, None, None, 0
+    result, problem, node, count, actual = None, None, None, 0, None
+    node = db.session.get(General, magos_id)
+    if node is None or node.role != "Magos":
+        abort(404)
     try:
+        from app import _vpn_v2_send
+        actual = _vpn_v2_send(node, "policy-status")
+        if not isinstance(actual, dict) or actual.get("writes_performed") is not False:
+            actual = None
         node, plan = build_magos_policy_plan(magos_id)
         count = sum(len(t["rules"]) for c in plan["clients"] for t in c["targets"])
         from app import _vpn_v2_send
@@ -102,7 +109,7 @@ def access_policy_apply_preview(magos_id):
     return render_template(
         "access_policy_apply_preview.html",
         magos=node, magos_id=magos_id, rule_count=count, result=result,
-        problem=problem, confirmation=FlaskForm(),
+        problem=problem, actual=actual, confirmation=FlaskForm(),
         enabled=os.environ.get("VPN_POLICY_APPLY_ENABLED") == "YES",
     )
 
@@ -156,3 +163,46 @@ def access_policy_apply(magos_id):
         return redirect(url_for("access_policies.vpn_access_policies"))
     flash("ACL на " + node.name + " применён. Проверьте фактический доступ с Cognitor.", "success")
     return redirect(url_for("access_policies.vpn_access_policies"))
+
+
+@policy_apply_bp.route("/access-policy/apply/<int:magos_id>/rollback", methods=["POST"])
+@login_required
+def access_policy_rollback(magos_id):
+    if current_user.role != "admin":
+        abort(403)
+    if not FlaskForm().validate_on_submit():
+        abort(400)
+    if os.environ.get("VPN_POLICY_APPLY_ENABLED") != "YES":
+        abort(403)
+    node = db.session.get(General, magos_id)
+    if node is None or node.role != "Magos":
+        abort(404)
+    if request.form.get("confirm_name") != node.name:
+        flash("Неправильное имя Magos; откат отменён", "danger")
+        return redirect(url_for("policy_apply.access_policy_apply_preview", magos_id=magos_id))
+    revision = request.form.get("expected_revision", "")
+    if len(revision) != 64 or any(c not in "0123456789abcdef" for c in revision):
+        abort(400)
+    operation_id = str(uuid4())
+    try:
+        from app import _vpn_v2_send
+        result = _vpn_v2_send(
+            node, "policy-rollback",
+            {"node_name": node.name, "address": node.ip_pool,
+             "expected_revision": revision},
+            operation_id=operation_id)
+        if (not isinstance(result, dict)
+                or result.get("state") != "rolled_back"
+                or result.get("operation_id") != operation_id):
+            raise ValueError("Rollback not acknowledged")
+    except Exception:
+        LOG.error("ACL rollback UNKNOWN magos=%s UUID=%s", node.name,
+                  operation_id, exc_info=True)
+        flash("Итог отката не подтверждён. Не повторяйте без проверки Magos. UUID: "
+              + operation_id, "danger")
+        return redirect(url_for("policy_apply.access_policy_apply_preview", magos_id=magos_id))
+    # A rollback can restore another revision: do not claim per-rule statuses
+    # until a desired-vs-actual reconciliation exists.
+    flash("На Magos восстановлена предыдущая ACL. Статусы отдельных правил "
+          "в БД требуют сверки с фактической ревизией.", "warning")
+    return redirect(url_for("policy_apply.access_policy_apply_preview", magos_id=magos_id))
