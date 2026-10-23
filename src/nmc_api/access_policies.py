@@ -27,7 +27,7 @@ class AccessPolicyForm(FlaskForm):
     ], validators=[DataRequired()])
     destination_port = StringField("Порт назначения (только TCP/UDP)")
     decision = SelectField("Решение", choices=[
-        ("allow", "Разрешить"), ("deny", "Запретить")
+        ("allow", "Разрешить"), ("deny", "Запретить (DROP)"), ("reject", "Отклонить (REJECT)")
     ], validators=[DataRequired()])
     submit = SubmitField("Сохранить черновик правила")
 
