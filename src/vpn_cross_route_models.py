@@ -18,3 +18,11 @@ class CrossRouteOperation(db.Model):
     message = db.Column(db.String(255), nullable=False, default="")
     created_at = db.Column(db.DateTime, nullable=False,
                            default=lambda: datetime.now(timezone.utc))
+
+
+class CrossRouteLease(db.Model):
+    """Unique per-node controller fence, enforced by the database itself."""
+    __tablename__ = "vpn_v2_cross_route_leases"
+
+    node_id = db.Column(db.Integer, db.ForeignKey("general.id"), primary_key=True)
+    operation_id = db.Column(db.String(36), nullable=False)
