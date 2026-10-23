@@ -306,3 +306,24 @@ def test_unknown_cognitor_state_displayed_but_not_selectable(web):
     assert submit(client, ids).status_code == 200
     with app.app_context():
         assert AccessPolicyDraft.query.count() == 0
+
+
+def test_applied_rule_delete_is_pending_until_magos_ack(web):
+    app, client, ids = web
+    login(client, ids[0])
+    assert submit(client, ids).status_code == 302
+    with app.app_context():
+        rule = AccessPolicyDraft.query.one()
+        rule.status = "applied"
+        rid = rule.id
+        db.session.commit()
+    response = client.post(f"/access-policy/rules/{rid}/delete", data={
+        "csrf_token": csrf(client),
+    })
+    assert response.status_code == 302
+    with app.app_context():
+        record = AccessPolicyDraft.query.one()
+        assert record.status == "pending_delete"
+        from nmc_api.policy_apply import build_magos_policy_plan
+        _, desired = build_magos_policy_plan(record.source_cognitor.parent_magos_id)
+        assert desired["clients"] == []
