@@ -1,0 +1,30 @@
+name: VPN v2 unified access policy UI
+on:
+  pull_request:
+    paths:
+      - 'src/nmc_api/legacy_policy_bridge.py'
+      - 'src/nmc_api/__init__.py'
+      - 'src/nmc_api/access_policies.py'
+      - 'templates/layout.html'
+      - 'templates/vpn_access_policies.html'
+      - 'templates/vpn_legacy_policy_archive.html'
+      - 'tests/test_vpn_policy_legacy_bridge.py'
+      - '.github/workflows/vpn-policy-unified.yml'
+  workflow_dispatch:
+jobs:
+  policy-v2-only:
+    name: Legacy APIs read-only archive and v2 navigation
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Dependencies
+        run: python -m pip install -r requirements.txt pytest
+      - name: Compile
+        run: python -m compileall -q src/nmc_api/legacy_policy_bridge.py src/nmc_api/access_policies.py
+      - name: Regression
+        run: python -m pytest -q tests/test_vpn_policy_legacy_bridge.py tests/test_vpn_access_policies.py tests/test_vpn_cognitor_blueprint.py tests/test_vpn_protected_objects.py

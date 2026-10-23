@@ -7,7 +7,11 @@
       <h2>Политики доступа VPN</h2>
       <p class="text-muted mb-0">Cognitor → защищаемый объект → протокол/порт → действие.</p>
     </div>
-    <a class="btn btn-outline-modern" href="{{ url_for('vpn_overview') }}">← VPN-сеть</a>
+    <div class="d-flex flex-wrap gap-2">
+      <a class="btn btn-outline-modern" href="{{ url_for('cognitors.vpn_cognitors') }}">Клиенты Cognitor</a>
+      <a class="btn btn-outline-modern" href="{{ url_for('protected_objects.vpn_protected_objects') }}">Защищаемые объекты</a>
+      <a class="btn btn-outline-modern" href="{{ url_for('vpn_overview') }}">← VPN-сеть</a>
+    </div>
   </div>
   <div class="alert alert-warning" role="note">
     Это только проектирование правил. Ни разрешение, ни запрет ещё не применяются на Magos.
@@ -15,8 +19,15 @@
     Черновик Cognitor не подтверждает наличие работающего VPN.
     До отдельного безопасного Apply политики не влияют на трафик.
   </div>
+  {% if legacy_policy_count %}
+  <div class="alert alert-warning mb-4" role="status">
+    Найдено старых правил: {{ legacy_policy_count }}. Они не смешиваются с VPN v2 и не мигрируются автоматически.
+    <a href="{{ url_for('legacy_policy_bridge.vpn_legacy_policy_archive') }}">Посмотреть старые правила (только чтение)</a>.
+  </div>
+  {% endif %}
   <div class="premium-card p-4 mb-4">
-    <h5 class="mb-3">Создать правило (черновик)</h5>
+    <h5 class="mb-2">Создать правило (черновик)</h5>
+    <p class="text-muted small">На этом этапе источник — управляемый Cognitor, назначение — зарегистрированный IP или сеть за Magos. Позже добавим источники LAN и группы. Omnissiah управляет, Magos фильтрует, когда будет реализован Apply.</p>
     <form action="{{ url_for('access_policies.vpn_access_policies') }}" method="post" class="row g-3" autocomplete="off">
       {{ form.hidden_tag() }}
       <div class="col-12 col-lg-6">
@@ -27,11 +38,13 @@
       <div class="col-12 col-lg-6">
         {{ form.source_cognitor_id.label(class="form-label") }}
         {{ form.source_cognitor_id(class="form-select") }}
+        <div class="form-text">Источник VPN v2; состояние регистрации отображается в списке. Выбор не подтверждает handshake.</div>
         {% for error in form.source_cognitor_id.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
       </div>
       <div class="col-12 col-lg-6">
         {{ form.target_object_id.label(class="form-label") }}
         {{ form.target_object_id(class="form-select") }}
+        <div class="form-text">Ресурс из реестра защищаемых объектов. Ручной ввод любого IP здесь намеренно не допускается.</div>
         {% for error in form.target_object_id.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
       </div>
       <div class="col-12 col-lg-6">
@@ -93,8 +106,18 @@
           {% for rule in rules %}
           <tr>
             <td><strong>{{ rule.name }}</strong></td>
-            <td>{{ rule.source_cognitor.name if rule.source_cognitor else 'Неизвестен' }}</td>
-            <td>{{ rule.target_object.name if rule.target_object else 'Неизвестен' }}</td>
+            <td>
+              {{ rule.source_cognitor.name if rule.source_cognitor else 'Неизвестен' }}
+              {% if rule.source_cognitor and rule.source_cognitor.parent_magos %}
+                <div class="text-muted small">через {{ rule.source_cognitor.parent_magos.name }}</div>
+              {% endif %}
+            </td>
+            <td>
+              {{ rule.target_object.name if rule.target_object else 'Неизвестен' }}
+              {% if rule.target_object %}
+                <div class="text-muted small">{{ rule.target_object.network }}</div>
+              {% endif %}
+            </td>
             <td>{{ rule.protocol | upper }}{{ ':' ~ rule.destination_port if rule.protocol != 'icmp' else '' }}</td>
             <td>{{ 'Разрешить' if rule.decision == 'allow' else 'Запретить' }}</td>
             <td><span class="badge bg-secondary">Не применено</span></td>

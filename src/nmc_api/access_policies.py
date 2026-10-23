@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from wtforms import SelectField, StringField, SubmitField
 from wtforms.validators import DataRequired, Length
 
-from nmc_models import db, General
+from nmc_models import db, General, AccessPolicyRule
 from vpn_access_policy_models import AccessPolicyDraft
 from vpn_access_policy_validation import AccessPolicyError, preview_policy, validate_policy
 from vpn_cognitor_models import CognitorDraft
@@ -82,7 +82,8 @@ def vpn_access_policies():
     return render_template("vpn_access_policies.html", form=form, rules=rules,
                            clients=clients, resources=resources,
                            unresolved_clients=unresolved_clients,
-                           legacy_clients=legacy_clients)
+                           legacy_clients=legacy_clients,
+                           legacy_policy_count=AccessPolicyRule.query.count())
 
 
 @access_policies_bp.route("/vpn/access-policies/<int:rule_id>/preview",

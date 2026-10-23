@@ -1324,6 +1324,12 @@ select.form-control-modern {
                             <span>VPN-сеть</span>
                         </a>
                     </div>
+                    <div class="nav-item">
+                        <a href="{{ url_for('access_policies.vpn_access_policies') }}" class="nav-link {% if request.endpoint in ('access_policies.vpn_access_policies', 'access_policies.vpn_access_policy_preview') %}active{% endif %}">
+                            <i class="bi bi-shield-check"></i>
+                            <span>Политики доступа VPN v2</span>
+                        </a>
+                    </div>
 
 
 
@@ -1345,9 +1351,9 @@ select.form-control-modern {
                         </a>
                     </div>
                     <div class="nav-item">
-                        <a href="{{ url_for('access_policy') }}" class="nav-link {% if request.endpoint == 'access_policy' %}active{% endif %}">
-                            <i class="bi bi-file-earmark-lock"></i>
-                            <span>Политика доступа (legacy)</span>
+                        <a href="{{ url_for('legacy_policy_bridge.vpn_legacy_policy_archive') }}" class="nav-link {% if request.endpoint == 'legacy_policy_bridge.vpn_legacy_policy_archive' %}active{% endif %}">
+                            <i class="bi bi-archive"></i>
+                            <span>Архив политик (legacy, чтение)</span>
                         </a>
                     </div>
                     <div class="nav-item">
