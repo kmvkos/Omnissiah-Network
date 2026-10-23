@@ -103,7 +103,7 @@ def normalize(plan, expected_node, management_addresses=()):
                 if not isinstance(rule, dict) or set(rule) != {"protocol", "port", "decision"}:
                     raise PolicyRejected("Unexpected policy rule fields")
                 proto, port, decision = rule["protocol"], rule["port"], rule["decision"]
-                if proto not in ("tcp", "udp", "icmp") or decision not in ("allow", "deny"):
+                if proto not in ("tcp", "udp", "icmp") or decision not in ("allow", "deny", "reject"):
                     raise PolicyRejected("Invalid protocol or action")
                 if type(port) is not int or (port != 0 if proto == "icmp" else not 1 <= port <= 65535):
                     raise PolicyRejected("Invalid destination port")
@@ -145,7 +145,8 @@ def nft_batch(plan, *, replace=False):
             for rule in target["rules"]:
                 proto = rule["protocol"]
                 qualifier = "ip protocol icmp" if proto == "icmp" else f"{proto} dport {rule['port']}"
-                action = "accept" if rule["decision"] == "allow" else "drop"
+                action = ("accept" if rule["decision"] == "allow" else "drop"
+                          if rule["decision"] == "deny" else "reject with icmpx type admin-prohibited")
                 lines.append(f"{match} {qualifier} {action}")
             lines.append(f"{match} drop")
     return "\n".join(lines) + "\n"
