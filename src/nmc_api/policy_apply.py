@@ -117,6 +117,7 @@ def inspect_cross_magos_paths(node, policy_plan, sender):
                     item["source"].get("gateway_checks_passed") is True
                     and item["destination"].get("gateway_checks_passed") is True)
                 item["source_name"], item["destination_name"] = source.name, dest.name
+                item["client_id"], item["object_id"] = client.id, resource.id
             except (CrossPathRejected, KeyError, ValueError, RuntimeError, OSError) as exc:
                 item["error"] = str(exc)
             report.append(item)
@@ -165,6 +166,7 @@ def access_policy_apply_preview(magos_id):
         magos=node, magos_id=magos_id, rule_count=count, result=result,
         problem=problem, actual=actual, cross_paths=cross_paths, confirmation=FlaskForm(),
         enabled=os.environ.get("VPN_POLICY_APPLY_ENABLED") == "YES",
+        route_apply_enabled=os.environ.get("VPN_CROSS_ROUTE_APPLY_ENABLED") == "YES",
     )
 
 
