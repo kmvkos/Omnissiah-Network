@@ -312,6 +312,27 @@ def test_full_mesh_plus_applied_cognitor_endpoints_and_legacy_write_gate(web, mo
     # Even after access via URL/API, no write call is made.
 
 
+
+def test_unresolved_cognitor_draft_blocks_legacy_mesh_apply(web):
+    """A timed-out add can leave a live peer but status='draft' in controller."""
+    app, client, admin, _, magos_id = web
+    login(client, admin)
+    with app.app_context():
+        db.session.add(CognitorDraft(
+            name="maybe-installed", public_key=KEY, vpn_address="10.77.0.5/32",
+            status="draft", parent_magos_id=magos_id))
+        db.session.commit()
+    for action in ("prepare", "apply", "route-transaction"):
+        response = client.post("/api/v2/vpn/mesh/operation",
+            headers={"X-VPN-Explicit-Apply": "ENABLE_TEST_MESH"},
+            json={"action": action, "node_id": magos_id,
+                  "expected_revision": "a" * 64,
+                  "operation_id": "00000000-0000-4000-8000-000000000001"})
+        assert response.status_code == 409
+        assert "Cognitor" in response.get_json()["error"]
+
+
+
 def test_unknown_peer_with_applied_cognitor_does_not_offer_mesh_apply(web, monkeypatch):
     app, client, admin, _, magos_id = web
     login(client, admin)
