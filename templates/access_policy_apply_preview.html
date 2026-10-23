@@ -36,6 +36,42 @@
       {% endif %}
     </div>
   {% endif %}
+  {% if cross_paths %}
+  <div class="premium-card p-4 mb-4">
+    <h5 class="mb-2">Межшлюзовая маршрутизация: проверка обеих сторон</h5>
+    <p class="text-warning small">
+      Это фактическая диагностика Magos через mTLS, а не применение.
+      Даже успешная проверка двух шлюзов не подтверждает обратный маршрут
+      на защищённом сервере и AllowedIPs самого Cognitor.
+      Изменение WG маршрутов пока заблокировано.
+    </p>
+    {% for path in cross_paths %}
+    <div class="border rounded p-3 mb-3">
+      <strong>{{ path.label }}</strong>
+      <div class="small mt-2">
+        Состояние шлюзов:
+        <span class="{{ 'text-success' if path.gateway_checks_passed else 'text-warning' }}">
+          {{ 'Обе стороны проверены (не end-to-end)' if path.gateway_checks_passed else 'Не готово' }}
+        </span>
+      </div>
+      {% if path.error %}<p class="text-danger small">{{ path.error }}</p>{% endif %}
+      {% for probe in [path.source, path.destination] %}
+        {% if probe %}
+        <div class="small mt-2">
+          <strong>{{ probe.node_name }} — {{ 'отправитель' if probe.role == 'source' else 'получатель' }}</strong>
+          <div>Требуется AllowedIPs: <code>{{ probe.required_allowed_ip }}</code></div>
+          <div>Требуется маршрут: <code>{{ probe.required_route }} via wg0</code></div>
+          {% for blocker in probe.blockers %}
+          <div class="text-warning">• {{ blocker }}</div>
+          {% endfor %}
+          {% if not probe.blockers %}<div class="text-success">Нет локальных блокирующих расхождений</div>{% endif %}
+        </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
   {% if actual and actual.active_revision %}
   <div class="premium-card p-4">
     <h5>Фактически применённая ревизия</h5>

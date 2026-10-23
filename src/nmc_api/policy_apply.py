@@ -13,7 +13,8 @@ from flask import Blueprint, abort, flash, redirect, render_template, request, u
 from flask_login import current_user, login_required
 from flask_wtf import FlaskForm
 
-from nmc_models import General, db
+from nmc_models import General, NodeConnection, db
+from vpn_cross_magos_plan import plan_cross_magos, CrossPathRejected
 from vpn_cognitor_models import CognitorDraft
 from vpn_protected_models import ProtectedNetworkDraft
 from vpn_access_policy_models import AccessPolicyDraft
@@ -80,12 +81,55 @@ def build_magos_policy_plan(magos_id):
     }
 
 
+def inspect_cross_magos_paths(node, policy_plan, sender):
+    """Both root helpers independently observe a direct peer path.
+
+    This is read-only. Even two successful gateway checks cannot establish the
+    protected host's reverse route or the unagented Cognitor's AllowedIPs.
+    """
+    magos = {item.id: item for item in General.query.filter_by(role="Magos").all()}
+    edges = NodeConnection.query.all()
+    clients = {c.name: c for c in CognitorDraft.query.all()}
+    resources = {r.network: r for r in ProtectedNetworkDraft.query.all()}
+    report = []
+    for entry in policy_plan["clients"]:
+        for target in entry["targets"]:
+            if not target["via_magos"]:
+                continue
+            label = entry["name"] + " → " + target["network"]
+            item = {"label": label, "gateway_checks_passed": False,
+                    "source": None, "destination": None, "error": None}
+            try:
+                client = clients[entry["name"]]
+                resource = resources[target["network"]]
+                source, dest, src_plan, dst_plan = plan_cross_magos(
+                    client, resource, magos, edges)
+                if source.id != node.id:
+                    raise CrossPathRejected("Cognitor parent does not match selected Magos")
+                item["source"] = sender(source, "policy-path-preview", src_plan)
+                item["destination"] = sender(dest, "policy-path-preview", dst_plan)
+                if (not isinstance(item["source"], dict)
+                        or not isinstance(item["destination"], dict)
+                        or item["source"].get("writes_performed") is not False
+                        or item["destination"].get("writes_performed") is not False):
+                    raise CrossPathRejected("Unsafe or malformed root probe response")
+                item["gateway_checks_passed"] = (
+                    item["source"].get("gateway_checks_passed") is True
+                    and item["destination"].get("gateway_checks_passed") is True)
+                item["source_name"], item["destination_name"] = source.name, dest.name
+            except (CrossPathRejected, KeyError, ValueError, RuntimeError, OSError) as exc:
+                item["error"] = str(exc)
+            report.append(item)
+    return report
+
+
 @policy_apply_bp.route("/access-policy/apply/<int:magos_id>/preview", methods=["GET"])
 @login_required
 def access_policy_apply_preview(magos_id):
     if current_user.role != "admin":
         abort(403)
     result, problem, node, count, actual = None, None, None, 0, None
+    cross_paths = []
     node = db.session.get(General, magos_id)
     if node is None or node.role != "Magos":
         abort(404)
@@ -97,6 +141,7 @@ def access_policy_apply_preview(magos_id):
         node, plan = build_magos_policy_plan(magos_id)
         count = sum(len(t["rules"]) for c in plan["clients"] for t in c["targets"])
         if any(t["via_magos"] for c in plan["clients"] for t in c["targets"]):
+            cross_paths = inspect_cross_magos_paths(node, plan, _vpn_v2_send)
             raise PolicyPlanError(
                 "Ресурс расположен за другим Magos. Не подтверждены маршруты "
                 "и WG AllowedIPs туда/обратно; применение заблокировано, "
@@ -118,7 +163,7 @@ def access_policy_apply_preview(magos_id):
     return render_template(
         "access_policy_apply_preview.html",
         magos=node, magos_id=magos_id, rule_count=count, result=result,
-        problem=problem, actual=actual, confirmation=FlaskForm(),
+        problem=problem, actual=actual, cross_paths=cross_paths, confirmation=FlaskForm(),
         enabled=os.environ.get("VPN_POLICY_APPLY_ENABLED") == "YES",
     )
 
