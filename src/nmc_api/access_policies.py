@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from wtforms import SelectField, StringField, SubmitField
 from wtforms.validators import DataRequired, Length
 
-from nmc_models import db
+from nmc_models import db, General
 from vpn_access_policy_models import AccessPolicyDraft
 from vpn_access_policy_validation import AccessPolicyError, preview_policy, validate_policy
 from vpn_cognitor_models import CognitorDraft
@@ -37,14 +37,26 @@ class AccessPolicyForm(FlaskForm):
 def vpn_access_policies():
     if current_user.role != "admin":
         abort(403)
-    clients = CognitorDraft.query.filter_by(status="applied").order_by(
-        CognitorDraft.name).all()
+    # Policy drafts describe intent and may be written before the client Apply.
+    # Never hide pending clients: an unknown add-only result may leave a live
+    # peer on Magos while the controller still labels the record 'draft'.
+    all_clients = CognitorDraft.query.order_by(CognitorDraft.name).all()
+    clients = [c for c in all_clients if c.status in ("draft", "applied")]
+    unresolved_clients = [c for c in all_clients if c.status not in ("draft", "applied")]
+    # Legacy General(Cognitor) is not the managed CognitorDraft registry.
+    # Expose it read-only for diagnosis, NEVER cast IDs into policy FK fields.
+    legacy_clients = General.query.filter_by(role="Cognitor").order_by(
+        General.name).all()
     resources = ProtectedNetworkDraft.query.filter_by(
         status="inventory_only").order_by(ProtectedNetworkDraft.name).all()
     by_client = {item.id: item for item in clients}
     by_object = {item.id: item for item in resources}
     form = AccessPolicyForm()
-    form.source_cognitor_id.choices = [(item.id, item.name) for item in clients]
+    form.source_cognitor_id.choices = [
+        (item.id, item.name + (" — применён на Magos" if item.status == "applied"
+                               else " — черновик, пока не применён"))
+        for item in clients
+    ]
     form.target_object_id.choices = [
         (item.id, item.name + " — " + item.network) for item in resources]
     if form.validate_on_submit():
@@ -68,7 +80,9 @@ def vpn_access_policies():
                   else "Название или условие правила уже существуют", "danger")
     rules = AccessPolicyDraft.query.order_by(AccessPolicyDraft.created_at.desc()).all()
     return render_template("vpn_access_policies.html", form=form, rules=rules,
-                           clients=clients, resources=resources)
+                           clients=clients, resources=resources,
+                           unresolved_clients=unresolved_clients,
+                           legacy_clients=legacy_clients)
 
 
 @access_policies_bp.route("/vpn/access-policies/<int:rule_id>/preview",
