@@ -105,6 +105,14 @@ def test_fail_closed_bad_manifest(change):
         mod.normalize(m, "magos03", ["192.168.32.167", "192.168.32.172"])
 
 
+def test_reject_is_explicit_nft_rejection_not_drop():
+    m = manifest()
+    m["clients"][0]["targets"][0]["rules"][1]["decision"] = "reject"
+    result = mod.nft_batch(mod.normalize(m, "magos03"))
+    assert "udp dport 53 reject with icmpx type admin-prohibited" in result
+    assert "flush ruleset" not in result
+
+
 def test_read_only_preview_never_runs_mutating_nft(tmp_path):
     fake = FakeCommands()
     result = engine(tmp_path, fake).preview(manifest())
