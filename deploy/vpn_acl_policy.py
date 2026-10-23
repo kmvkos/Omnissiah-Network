@@ -51,8 +51,8 @@ def normalize(plan, expected_node, management_addresses=()):
         raise PolicyRejected("ACL plan belongs to another Magos")
     own = _network(plan["address"], host=True)
     raw = plan["clients"]
-    if not isinstance(raw, list) or not 1 <= len(raw) <= 32:
-        raise PolicyRejected("ACL plan must contain 1-32 managed Cognitors")
+    if not isinstance(raw, list) or len(raw) > 32:
+        raise PolicyRejected("ACL plan supports up to 32 managed Cognitors")
     management = []
     for addr in management_addresses:
         try:
@@ -135,6 +135,7 @@ def nft_batch(plan, *, replace=False):
     lines.append(f"add table inet {TABLE}")
     lines.append(
         f"add chain inet {TABLE} forward {{ type filter hook forward priority -30; policy accept; }}")
+    lines.append(f'add rule inet {TABLE} forward counter comment "omnissiah-rev-{digest(plan)}"')
     for client in plan["clients"]:
         source = str(ip_interface(client["address"]).ip)
         for target in client["targets"]:
@@ -166,9 +167,30 @@ class LinuxACL:
             raise PolicyRejected("Read-only preflight or nft operation failed")
         return res
 
-    def _table_present(self):
+    def _runtime(self):
         result = self._run(["nft", "-j", "list", "table", "inet", TABLE], fail=False)
-        return result.returncode == 0
+        if result.returncode:
+            return None
+        try:
+            entries = json.loads(result.stdout)["nftables"]
+            comments = [expr["comment"] for item in entries if "rule" in item
+                        for expr in item["rule"].get("expr", []) if "comment" in expr]
+            chains = [item["chain"] for item in entries if "chain" in item]
+            if (len(chains) != 1 or chains[0].get("name") != "forward"
+                    or chains[0].get("hook") != "forward"
+                    or chains[0].get("prio") != -30
+                    or chains[0].get("policy") != "accept"):
+                raise PolicyRejected("Unexpected ACL chain ownership or priority")
+            revisions = [c.removeprefix("omnissiah-rev-") for c in comments
+                         if c.startswith("omnissiah-rev-")]
+            if len(revisions) != 1 or not re.fullmatch(r"[a-f0-9]{64}", revisions[0]):
+                raise PolicyRejected("Missing or ambiguous ACL runtime revision")
+            return revisions[0]
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            raise PolicyRejected("Could not verify live nftables ACL ownership") from exc
+
+    def _table_present(self):
+        return self._run(["nft", "-j", "list", "table", "inet", TABLE], fail=False).returncode == 0
 
     def _active(self):
         file = self.state / "acl-active.json"
@@ -190,6 +212,10 @@ class LinuxACL:
         present = self._table_present()
         if bool(previous) != present:
             raise PolicyRejected("Existing nft ACL/table state mismatch; manual reconciliation required")
+        if previous and self._runtime() != previous["digest"]:
+            raise PolicyRejected("The live ACL revision differs from the last committed snapshot")
+        if (self.state / "acl-previous.json").exists():
+            raise PolicyRejected("Unresolved policy transaction; recover before preview/apply")
         dump = self._run(["wg", "show", "wg0", "dump"]).stdout
         peers = {}
         for row in dump.splitlines()[1:]:
@@ -200,6 +226,10 @@ class LinuxACL:
             if client["address"] not in peers.get(client["public_key"], set()):
                 raise PolicyRejected("Cognitor peer is not installed with expected /32 route")
             for target in client["targets"]:
+                if target["via_magos"]:
+                    # Source-only wg0 route cannot prove that the peer accepts
+                    # the target or that a return route exists. Block, don't guess.
+                    raise PolicyRejected("Cross-Magos requires verified bidirectional WireGuard routes")
                 dst = ip_network(target["network"])
                 address = dst.network_address
                 if dst.prefixlen < 32:
@@ -220,15 +250,19 @@ class LinuxACL:
 
     def status(self):
         active = self._active()
-        if bool(active) != self._table_present():
-            raise PolicyRejected("Policy state drift requires manual recovery")
+        present = self._table_present()
+        runtime = self._runtime() if present else None
+        drift = (bool(active) != present
+                 or (active is not None and runtime != active["digest"]))
         rollback_file = self.state / "acl-rollback.json"
         recovery = self.state / "acl-previous.json"
         return {
             "active_revision": active["digest"] if active else None,
-            "rollback_available": bool(active) and rollback_file.is_file()
+            "rollback_available": bool(active) and not drift and rollback_file.is_file()
                                   and not rollback_file.is_symlink() and not recovery.exists(),
-            "recovery_required": recovery.exists(),
+            "recovery_required": recovery.exists() or drift,
+            "runtime_revision": runtime,
+            "drift": drift,
             "writes_performed": False,
         }
 
@@ -260,6 +294,8 @@ class LinuxACL:
     def apply(self, raw, *, revision, operation_id):
         if os.environ.get("OMNISSIAH_ENABLE_POLICY_APPLY") != "YES":
             raise PolicyRejected("ACL apply disabled by host installation policy")
+        if os.environ.get("OMNISSIAH_POLICY_RESTORE_READY") != "YES":
+            raise PolicyRejected("ACL boot recovery is not configured")
         try:
             uid = uuid.UUID(operation_id)
             if uid.version != 4 or str(uid) != operation_id:
