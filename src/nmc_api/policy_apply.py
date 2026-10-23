@@ -49,7 +49,7 @@ def build_magos_policy_plan(magos_id):
         obj = resources.get(rule.target_object_id)
         if obj is None or obj.status != "inventory_only":
             raise PolicyPlanError("Защищаемый объект отсутствует или требует проверки")
-        if rule.protocol not in ("tcp", "udp", "icmp") or rule.decision not in ("allow", "deny"):
+        if rule.protocol not in ("tcp", "udp", "icmp") or rule.decision not in ("allow", "deny", "reject"):
             raise PolicyPlanError("Неверный протокол/действие в сохранённой политике")
         if type(rule.destination_port) is not int:
             raise PolicyPlanError("Неверный порт в сохранённом правиле")
