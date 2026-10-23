@@ -173,8 +173,10 @@ class LinuxACL:
             return None
         try:
             entries = json.loads(result.stdout)["nftables"]
-            comments = [expr["comment"] for item in entries if "rule" in item
-                        for expr in item["rule"].get("expr", []) if "comment" in expr]
+            # JSON netlink exposes a rule comment at rule["comment"],
+            # not as a match expression in rule["expr"].
+            comments = [item["rule"]["comment"] for item in entries
+                        if "rule" in item and "comment" in item["rule"]]
             chains = [item["chain"] for item in entries if "chain" in item]
             if (len(chains) != 1 or chains[0].get("name") != "forward"
                     or chains[0].get("hook") != "forward"
@@ -318,6 +320,8 @@ class LinuxACL:
             self._atomic(marker, json.dumps({"operation_id": operation_id, "previous": previous}))
             try:
                 self._run(["nft", "-f", "-"], input=nft_batch(plan, replace=present))
+                if self._runtime() != digest(plan):
+                    raise PolicyRejected("Live nftables revision not verified after Apply")
                 self._atomic(self.state / "acl-active.json",
                              json.dumps({"plan": plan, "digest": digest(plan)}, sort_keys=True))
                 self._atomic(self.state / "acl-rollback.json",
@@ -337,6 +341,43 @@ class LinuxACL:
                 except Exception as rollback_error:
                     raise PolicyRejected("ACL rollback failed; manual recovery required") from rollback_error
                 raise PolicyRejected("ACL apply failed; previous managed policy restored") from exc
+
+
+    def restore_on_boot(self):
+        """Install last committed ACL before wg-quick can bring the tunnel up.
+
+        Never invent policy on boot. Journal drift is a blocking error. This
+        operation is intended only for the root-only systemd boot unit.
+        """
+        if os.geteuid() != 0:
+            raise PolicyRejected("Boot restoration requires root")
+        self.state.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with (self.state / "acl.lock").open("a+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            if (self.state / "acl-previous.json").exists():
+                raise PolicyRejected("Incomplete ACL operation; boot restore refused")
+            active = self._active()
+            if active is None:
+                if self._table_present():
+                    raise PolicyRejected("Unmanaged ACL table exists; refusing takeover")
+                return {"state": "no_policy", "writes_performed": False}
+            verified = normalize(active["plan"], self.node_name, self.protected_ips)
+            if digest(verified) != active["digest"]:
+                raise PolicyRejected("Untrusted ACL snapshot")
+            runtime = self._runtime() if self._table_present() else None
+            if runtime is not None and runtime != active["digest"]:
+                raise PolicyRejected("Live policy conflict during boot restore")
+            if runtime == active["digest"]:
+                return {"state": "already_installed", "revision": active["digest"],
+                        "writes_performed": False}
+            # This is the only safe time to restore from a trusted snapshot:
+            # wg0 has not yet been made available by the guarded systemd unit.
+            self._run(["nft", "-c", "-f", "-"], input=nft_batch(verified))
+            self._run(["nft", "-f", "-"], input=nft_batch(verified))
+            if self._runtime() != active["digest"]:
+                raise PolicyRejected("Boot ACL installation not verified")
+            return {"state": "restored", "revision": active["digest"],
+                    "writes_performed": True}
 
     def rollback(self, *, revision, operation_id):
         """Explicitly restore the last root-saved policy snapshot, no arbitrary input."""
@@ -383,6 +424,8 @@ class LinuxACL:
                 else:
                     self._run(["nft", "-f", "-"],
                               input=nft_batch(previous["plan"], replace=True))
+                    if self._runtime() != previous["digest"]:
+                        raise PolicyRejected("Previous ACL was not restored in kernel")
                     self._atomic(self.state / "acl-active.json", json.dumps(previous))
                     self._atomic(rollback_path,
                                  json.dumps({"commit": previous["digest"], "previous": current}))
