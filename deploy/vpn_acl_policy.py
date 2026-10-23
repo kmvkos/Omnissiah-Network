@@ -229,6 +229,18 @@ class LinuxACL:
             raise PolicyRejected("The live ACL revision differs from the last committed snapshot")
         if (self.state / "acl-previous.json").exists():
             raise PolicyRejected("Unresolved policy transaction; recover before preview/apply")
+        # Route and ACL use separate workers. Never check/apply ACL while
+        # the current Magos has an unfinished distributed WG route operation.
+        cross_journal = self.state / "cross-route-operation.json"
+        if cross_journal.is_symlink():
+            raise PolicyRejected("Unsafe cross-route journal")
+        if cross_journal.exists():
+            try:
+                cross_record = json.loads(cross_journal.read_text())
+                if cross_record.get("state") not in ("finished", "reverted"):
+                    raise PolicyRejected("Cross-Magos route transaction is unresolved")
+            except (ValueError, OSError, AttributeError) as exc:
+                raise PolicyRejected("Unreadable cross-Magos route journal") from exc
         # A route existing in Linux does not mean the kernel will forward
         # packets originating from Cognitor.
         if plan["clients"] and self._run(
