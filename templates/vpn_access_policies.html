@@ -96,6 +96,24 @@
     </ul>
   </div>
   {% endif %}
+  {% if client_route_requirements %}
+  <div class="premium-card p-4 mb-4">
+    <h5 class="mb-2">Маршруты на клиентах Cognitor</h5>
+    <p class="text-muted small">
+      Помимо firewall, клиент должен направлять трафик защищаемых ресурсов в VPN.
+      На Cognitor нет управляемого агента, поэтому необходимо проверить и сохранить
+      AllowedIPs в конфигурации клиента WireGuard. Не изменяйте ключи и Endpoint.
+    </p>
+    {% for item in client_route_requirements %}
+    <div class="mb-3">
+      <strong>{{ item.name }}</strong><span class="text-muted small"> → {{ item.gateway }}</span>
+      <code class="d-block p-2 mt-1" style="overflow-wrap:anywhere">AllowedIPs = {{ item.allowed_ips }}</code>
+      <div class="text-muted small">После обновления клиента проверьте маршруты в wg0.
+        Серверный Apply не меняет конфигурацию на Cognitor автоматически.</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
   <div class="premium-card p-4 mb-4">
     <h5 class="mb-2">Применение на Magos</h5>
     <p class="text-muted small mb-3">
