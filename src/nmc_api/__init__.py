@@ -13,6 +13,7 @@ from .protected_objects import protected_objects_bp
 from .access_policies import access_policies_bp
 from .legacy_policy_bridge import legacy_policy_bridge_bp
 from .policy_apply import policy_apply_bp
+from .cross_routes import cross_route_bp
 
 # Список всех Blueprints для регистрации
 api_blueprints = [
@@ -24,7 +25,8 @@ api_blueprints = [
     protected_objects_bp,
     access_policies_bp,
     legacy_policy_bridge_bp,
-    policy_apply_bp
+    policy_apply_bp,
+    cross_route_bp
 ]
 
 __all__ = [
@@ -37,5 +39,6 @@ __all__ = [
     'access_policies_bp',
     'legacy_policy_bridge_bp',
     'policy_apply_bp',
+    'cross_route_bp',
     'api_blueprints'
 ]

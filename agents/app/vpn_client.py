@@ -8,7 +8,7 @@ MAX_BYTES = 65536
 
 
 def request_helper(action, *, plan=None, node_name=None, operation_id=None):
-    if action not in ("identity", "status", "prepare", "start", "apply", "route-preview", "route-transaction", "transaction-status", "cognitor-preview", "cognitor-add", "policy-preview", "policy-apply", "policy-status", "policy-rollback", "policy-path-preview"):
+    if action not in ("identity", "status", "prepare", "start", "apply", "route-preview", "route-transaction", "transaction-status", "cognitor-preview", "cognitor-add", "policy-preview", "policy-apply", "policy-status", "policy-rollback", "policy-path-preview", "route-ext-prepare", "route-ext-commit", "route-ext-revert", "route-ext-finalize"):
         raise ValueError("Unsupported VPN action")
     message = {"action": action}
     if node_name is not None:

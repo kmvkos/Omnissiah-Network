@@ -15,6 +15,8 @@ sys.path.insert(0, str(SRC))
 from nmc_models import db, General, BaseUser, NodeConnection
 from nmc_api.policy_apply import policy_apply_bp, build_magos_policy_plan, PolicyPlanError, inspect_cross_magos_paths
 from nmc_api.access_policies import access_policies_bp
+from nmc_api.cross_routes import cross_route_bp
+from vpn_cross_route_models import CrossRouteOperation
 from vpn_cognitor_models import CognitorDraft
 from vpn_protected_models import ProtectedNetworkDraft
 from vpn_access_policy_models import AccessPolicyDraft
@@ -46,6 +48,7 @@ def site(tmp_path, monkeypatch):
 
     app.register_blueprint(policy_apply_bp)
     app.register_blueprint(access_policies_bp)
+    app.register_blueprint(cross_route_bp)
     with app.app_context():
         db.create_all()
         admin = BaseUser(email="admin", password_hash="test", role="admin")
@@ -259,3 +262,79 @@ def test_cross_magos_fail_closed_when_direct_edge_is_missing(site):
         assert result[0]["gateway_checks_passed"] is False
         assert "direct mesh" in result[0]["error"]
         assert calls == []
+
+
+def test_distributed_route_action_denied_by_default_and_without_confirmation(site, monkeypatch):
+    app, client, (admin, _, mid, cid, _), calls = site
+    login(client, admin)
+    csrf = token(client, mid)
+    with app.app_context():
+        source = General.query.filter_by(name="magos03").one()
+        destination = General.query.filter_by(name="magos01").one()
+        source.public_key = "B"*43+"="
+        destination.public_key = "C"*43+"="
+        target = ProtectedNetworkDraft.query.one()
+        target.parent_magos_id = destination.id
+        obj_id = target.id
+        db.session.add(NodeConnection(node1_id=source.id, node2_id=destination.id))
+        db.session.commit()
+    monkeypatch.delenv("VPN_CROSS_ROUTE_APPLY_ENABLED", raising=False)
+    route = f"/access-policy/cross-route/{cid}/{obj_id}/apply"
+    assert client.post(route, data={"csrf_token": csrf,
+                       "confirm_path": "magos03->magos01"}).status_code == 403
+    monkeypatch.setenv("VPN_CROSS_ROUTE_APPLY_ENABLED", "YES")
+    response = client.post(route, data={"csrf_token": csrf,
+                                      "confirm_path": "magos01->magos03"})
+    assert response.status_code == 302
+    with app.app_context():
+        assert CrossRouteOperation.query.count() == 0
+    assert not any(a[1].startswith("route-ext-") for a in calls)
+
+
+def test_distributed_route_apply_journaled_before_writes(site, monkeypatch):
+    app, client, (admin, _, mid, cid, _), calls = site
+    login(client, admin)
+    csrf = token(client, mid)
+    with app.app_context():
+        source = General.query.filter_by(name="magos03").one()
+        destination = General.query.filter_by(name="magos01").one()
+        source.public_key = "B"*43+"="
+        destination.public_key = "C"*43+"="
+        target = ProtectedNetworkDraft.query.one()
+        target.parent_magos_id = destination.id
+        obj_id = target.id
+        db.session.add(NodeConnection(node1_id=source.id, node2_id=destination.id))
+        db.session.commit()
+    monkeypatch.setenv("VPN_CROSS_ROUTE_APPLY_ENABLED", "YES")
+    calls.clear()
+    def send(node, action, plan, operation_id=None):
+        calls.append((node.name, action))
+        if action == "route-ext-prepare":
+            with app.app_context():
+                # Persist an operation fence before the very first RPC.
+                expected = "preparing" if node.name == "magos03" else "prepared"
+                assert CrossRouteOperation.query.filter_by(
+                    operation_id=operation_id, state=expected).count() == 1
+            return {"state": "prepared", "revision": "a"*64, "operation_id": operation_id}
+        if action == "route-ext-commit":
+            return {"state": "committed", "revision": plan["revision"],
+                    "operation_id": operation_id}
+        if action == "policy-path-preview":
+            return {"gateway_checks_passed": True, "writes_performed": False}
+        if action == "route-ext-finalize":
+            return {"state": "finished", "operation_id": operation_id}
+        raise AssertionError("Unexpected RPC " + action)
+    monkeypatch.setattr(sys.modules["app"], "_vpn_v2_send", send)
+    route = f"/access-policy/cross-route/{cid}/{obj_id}/apply"
+    response = client.post(route, data={"csrf_token": csrf,
+                                      "confirm_path": "magos03->magos01"})
+    assert response.status_code == 302
+    assert calls[:4] == [("magos03", "route-ext-prepare"),
+                         ("magos01", "route-ext-prepare"),
+                         ("magos01", "route-ext-commit"),
+                         ("magos03", "route-ext-commit")]
+    with app.app_context():
+        operation = CrossRouteOperation.query.one()
+        assert operation.state == "committed"
+        assert operation.source_revision == "a"*64
+        assert operation.destination_revision == "a"*64

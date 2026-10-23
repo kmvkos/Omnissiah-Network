@@ -128,6 +128,7 @@
     - vpn_acl_policy.py
     - vpn_acl_restore_cli.py
     - vpn_cross_path_probe.py
+    - vpn_cross_route_transaction.py
   when: inventory_hostname in groups.magos
   notify: Restart VPN RPC
 
