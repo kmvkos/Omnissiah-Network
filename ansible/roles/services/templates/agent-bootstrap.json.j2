@@ -9,7 +9,7 @@
   "manage_wireguard": false,
   "vpn_control_enabled": true,
   "vpn_route_transactions_enabled": {{ (omnissiah_vpn_route_transactions_agent_enabled | default(false)) | to_json }},
-  "vpn_policy_apply_enabled": {{ (omnissiah_policy_apply_agent_enabled | default(false) | bool) | to_json }},
+  "vpn_policy_apply_enabled": {{ (omnissiah_policy_apply_agent_enabled | default(false)) | to_json }},
   "mtls_enabled": true,
   "mtls_required": true,
   "mtls_cert_file": {{ (omnissiah_state_dir ~ '/pki/identity.crt') | to_json }},
