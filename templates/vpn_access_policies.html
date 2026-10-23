@@ -1,0 +1,80 @@
+{% extends 'layout.html' %}
+{% block title %}Политики доступа — VPN{% endblock %}
+{% block content %}
+<div class="container-fluid">
+  <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <div>
+      <h2>Политики доступа VPN</h2>
+      <p class="text-muted mb-0">Cognitor → защищаемый объект → протокол/порт → действие.</p>
+    </div>
+    <a class="btn btn-outline-modern" href="{{ url_for('vpn_overview') }}">← VPN-сеть</a>
+  </div>
+  <div class="alert alert-warning" role="note">
+    Это только проектирование правил. Ни разрешение, ни запрет ещё не применяются на Magos.
+    До отдельного безопасного Apply политики не влияют на трафик.
+  </div>
+  <div class="premium-card p-4 mb-4">
+    <h5 class="mb-3">Создать правило (черновик)</h5>
+    <form action="{{ url_for('access_policies.vpn_access_policies') }}" method="post" class="row g-3" autocomplete="off">
+      {{ form.hidden_tag() }}
+      <div class="col-12 col-lg-6">
+        {{ form.name.label(class="form-label") }}
+        {{ form.name(class="form-control", maxlength="50", placeholder="cognitor-db-ssh") }}
+        {% for error in form.name.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="col-12 col-lg-6">
+        {{ form.source_cognitor_id.label(class="form-label") }}
+        {{ form.source_cognitor_id(class="form-select") }}
+        {% for error in form.source_cognitor_id.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="col-12 col-lg-6">
+        {{ form.target_object_id.label(class="form-label") }}
+        {{ form.target_object_id(class="form-select") }}
+        {% for error in form.target_object_id.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="col-12 col-lg-6">
+        {{ form.protocol.label(class="form-label") }}
+        {{ form.protocol(class="form-select") }}
+      </div>
+      <div class="col-12 col-lg-6">
+        {{ form.destination_port.label(class="form-label") }}
+        {{ form.destination_port(class="form-control", placeholder="22 (пусто для ICMP)", inputmode="numeric") }}
+        {% for error in form.destination_port.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="col-12 col-lg-6">
+        {{ form.decision.label(class="form-label") }}
+        {{ form.decision(class="form-select") }}
+      </div>
+      <div class="col-12">
+        {{ form.submit(class="btn btn-outline-modern", disabled=(not clients or not resources)) }}
+        {% if not clients or not resources %}
+          <span class="text-warning small ms-2">Нужен применённый Cognitor и хотя бы один защищаемый объект.</span>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+  <div class="premium-card p-4">
+    <h5 class="mb-3">Сохранённые правила</h5>
+    <div class="table-responsive">
+      <table class="table table-dark premium-table">
+        <thead><tr><th>Правило</th><th>Источник</th><th>Назначение</th><th>Протокол / порт</th><th>Решение</th><th>Состояние</th><th>Предпросмотр</th></tr></thead>
+        <tbody>
+          {% for rule in rules %}
+          <tr>
+            <td><strong>{{ rule.name }}</strong></td>
+            <td>{{ rule.source_cognitor.name if rule.source_cognitor else 'Неизвестен' }}</td>
+            <td>{{ rule.target_object.name if rule.target_object else 'Неизвестен' }}</td>
+            <td>{{ rule.protocol | upper }}{{ ':' ~ rule.destination_port if rule.protocol != 'icmp' else '' }}</td>
+            <td>{{ 'Разрешить' if rule.decision == 'allow' else 'Запретить' }}</td>
+            <td><span class="badge bg-secondary">Не применено</span></td>
+            <td><a class="btn btn-sm btn-outline-modern" href="{{ url_for('access_policies.vpn_access_policy_preview', rule_id=rule.id) }}">Проверить</a></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="7" class="text-muted text-center">Черновиков правил пока нет</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
