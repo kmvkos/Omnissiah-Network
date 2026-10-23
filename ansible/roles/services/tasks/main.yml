@@ -126,6 +126,7 @@
     - vpn_cognitor_transaction.py
     - vpn_prepared_recovery.py
     - vpn_acl_policy.py
+    - vpn_acl_restore_cli.py
   when: inventory_hostname in groups.magos
   notify: Restart VPN RPC
 
@@ -164,6 +165,53 @@
   ansible.builtin.systemd_service:
     name: omnissiah-vpn-prepared-recovery.service
     enabled: "{{ omnissiah_vpn_prepared_recovery_boot_enabled | default(false) | bool }}"
+    daemon_reload: true
+  when: inventory_hostname in groups.magos
+
+# Boot restoration is install-time opt-in. It never starts/restarts wg0.
+- name: Stage ACL restore boot unit
+  ansible.builtin.template:
+    src: omnissiah-acl-restore.service.j2
+    dest: /etc/systemd/system/omnissiah-acl-restore.service
+    owner: root
+    group: root
+    mode: '0644'
+  when: inventory_hostname in groups.magos
+
+- name: Ensure WireGuard systemd drop-in directory exists for ACL recovery
+  ansible.builtin.file:
+    path: /etc/systemd/system/wg-quick@wg0.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when:
+    - inventory_hostname in groups.magos
+    - omnissiah_policy_restore_boot_enabled | default(false) | bool
+
+- name: Guard systemd-managed wg0 startup with ACL boot restore
+  ansible.builtin.template:
+    src: wg0-acl-restore-dependency.conf.j2
+    dest: /etc/systemd/system/wg-quick@wg0.service.d/10-omnissiah-acl-restore.conf
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - inventory_hostname in groups.magos
+    - omnissiah_policy_restore_boot_enabled | default(false) | bool
+
+- name: Remove WireGuard ACL restore dependency if feature disabled
+  ansible.builtin.file:
+    path: /etc/systemd/system/wg-quick@wg0.service.d/10-omnissiah-acl-restore.conf
+    state: absent
+  when:
+    - inventory_hostname in groups.magos
+    - not (omnissiah_policy_restore_boot_enabled | default(false) | bool)
+
+- name: Configure ACL restore boot policy without starting a network service
+  ansible.builtin.systemd_service:
+    name: omnissiah-acl-restore.service
+    enabled: "{{ omnissiah_policy_restore_boot_enabled | default(false) | bool }}"
     daemon_reload: true
   when: inventory_hostname in groups.magos
 
