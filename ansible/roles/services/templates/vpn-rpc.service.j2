@@ -23,6 +23,9 @@ Environment="OMNISSIAH_ENABLE_POLICY_APPLY=YES"
 Environment="OMNISSIAH_POLICY_RESTORE_READY=YES"
 {% endif %}
 {% endif %}
+{% if omnissiah_cross_route_apply_root_enabled | default(false) is sameas true %}
+Environment="OMNISSIAH_ENABLE_CROSS_ROUTE_APPLY=YES"
+{% endif %}
 ExecStart=/usr/bin/python3 /usr/local/libexec/omnissiah-vpn-rpc
 Restart=on-failure
 RestartSec=2
