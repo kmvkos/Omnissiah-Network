@@ -75,15 +75,15 @@
     <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
       <div>
         <h5 class="mb-1">2. Соответствие конфигурации</h5>
-        <p class="text-muted small mb-0">Сверка сейчас учитывает только Mesh-пиры Magos, а не Cognitor. После подключения клиента здесь возможно расхождение до расширения модели топологии; маршруты и туннели эта проверка не меняет.</p>
+        <p class="text-muted small mb-0">Проверяются все управляемые пиры: Mesh Magos и применённые Cognitor. Посторонние пиры не скрываются. Операции чтения не меняют маршруты и туннели.</p>
       </div>
       <button id="vpnReconcileBtn" type="button" class="btn btn-outline-modern" onclick="checkVpnDrift()">Сверить состояние</button>
     </div>
     <div id="vpnReconcileState" role="status" class="text-muted small mb-3">Нажмите «Сверить состояние», чтобы опросить Magos по mTLS.</div>
     <div class="table-responsive">
       <table class="table table-dark premium-table">
-        <thead><tr><th>Magos</th><th>Ожидается пиров</th><th>Обнаружено пиров</th><th>Сверка</th><th>Причина</th></tr></thead>
-        <tbody id="vpnReconcileRows"><tr><td colspan="5" class="text-muted text-center">Опрос ещё не выполнялся</td></tr></tbody>
+        <thead><tr><th>Magos</th><th>Ожидается пиров</th><th>Состав</th><th>Обнаружено пиров</th><th>Сверка</th><th>Причина</th></tr></thead>
+        <tbody id="vpnReconcileRows"><tr><td colspan="6" class="text-muted text-center">Опрос ещё не выполнялся</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -146,7 +146,9 @@ const VPN_REASONS = Object.freeze({
   unresolved_transaction: 'Обнаружена незавершённая операция',
   missing_backup: 'Не найдена резервная копия операции',
   invalid_operation_ledger: 'Повреждён журнал UUID',
-  management_status_unavailable: 'Не удалось получить статус управления'
+  management_status_unavailable: 'Не удалось получить статус управления',
+  cognitor_managed_drift_requires_review: 'На Magos есть Cognitor. Изменения только после отдельной безопасной проверки',
+  cognitor_registry_conflict: 'Конфликт реестра Cognitor и топологии Magos'
 });
 function vpnJournalStateRu(code) { return VPN_JOURNAL_STATES[code] || 'Неизвестно (' + String(code || '—') + ')'; }
 function vpnJournalPhaseRu(code) { return VPN_JOURNAL_PHASES[code] || 'Неизвестно (' + String(code || '—') + ')'; }
@@ -250,7 +252,7 @@ async function vpnPreviewChanges() {
   button.disabled = true;
   message.textContent = 'Проверяю фактическое состояние Magos...';
   try {
-    const response = await fetch('{{ url_for("vpn_mesh_change_preview") }}', {
+    const response = await fetch('{{ url_for("cognitors.vpn_managed_mesh_change_preview") }}', {
       credentials: 'same-origin', cache: 'no-store'
     });
     if (!(response.headers.get('content-type') || '').includes('application/json')) {
@@ -277,6 +279,7 @@ async function vpnPreviewChanges() {
       const actionCell = document.createElement('td');
       if (item.reason === 'route_changes_validated_but_not_applied' &&
           item.transaction_available === true &&
+          item.desired_cognitor_peers === 0 &&
           typeof item.preview_revision === 'string' && item.preview_revision.length === 64) {
         const run = document.createElement('button');
         run.type = 'button';
@@ -309,7 +312,7 @@ async function checkVpnDrift() {
   btn.disabled = true;
   info.textContent = 'Опрос фактического состояния Magos...';
   try {
-    const response = await fetch('{{ url_for("reconcile_vpn_mesh") }}', {
+    const response = await fetch('{{ url_for("cognitors.vpn_managed_mesh_reconcile") }}', {
       credentials: 'same-origin', cache: 'no-store'
     });
     const kind = response.headers.get('content-type') || '';
@@ -328,11 +331,15 @@ async function checkVpnDrift() {
           : item.state === 'drift' ? 'Есть расхождения' : 'Не удалось проверить';
       const reason = (item.reason ? vpnReasonRu(item.reason) : null) || (item.state === 'drift'
           ? 'Отсутствует / отличается пир: ' + item.missing_peers + ' / ' + item.unexpected_peers + ' / ' + item.different_peers : '—');
-      const values = [item.node_name, item.desired_peers, item.observed_peers ?? '—', label, reason];
+      const composition = item.desired_mesh_peers !== undefined
+        ? String(item.desired_mesh_peers) + ' Mesh + ' + String(item.desired_cognitor_peers || 0) + ' Cognitor'
+        : '—';
+      const values = [item.node_name, item.desired_peers ?? '—', composition,
+        item.observed_peers ?? '—', label, reason];
       for (let i = 0; i < values.length; i++) {
         const cell = document.createElement('td');
         cell.textContent = String(values[i]);
-        if (i === 3) {
+        if (i === 4) {
           const color = item.state === 'in_sync' ? 'success' : item.state === 'drift' ? 'warning' : 'secondary';
           cell.className = 'text-' + color;
         }
