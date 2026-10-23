@@ -15,7 +15,8 @@ from nmc_models import General, NodeConnection, db
 from vpn_access_policy_models import AccessPolicyDraft
 from vpn_cognitor_models import CognitorDraft
 from vpn_protected_models import ProtectedNetworkDraft
-from vpn_cross_route_models import CrossRouteOperation
+from vpn_cross_route_models import CrossRouteOperation, CrossRouteLease
+from sqlalchemy.exc import IntegrityError
 from vpn_cross_magos_plan import plan_cross_magos, CrossPathRejected
 from vpn_cross_route_coordinator import (
     CrossRouteCoordinationError, run_direct_route_transaction
@@ -77,7 +78,18 @@ def apply_cross_route(client_id, object_id):
         destination_magos_id=dest.id, cognitor_id=client_id,
         object_id=object_id, state="preparing")
     db.session.add(record)
-    db.session.commit()
+    db.session.add_all([
+        CrossRouteLease(node_id=source.id, operation_id=opid),
+        CrossRouteLease(node_id=dest.id, operation_id=opid),
+    ])
+    try:
+        db.session.commit()  # Atomic unique ownership of both Magos.
+    except IntegrityError:
+        db.session.rollback()
+        flash("Один из Magos занят другой маршрутной транзакцией. "
+              "Операция не запускалась.", "danger")
+        return redirect(url_for("policy_apply.access_policy_apply_preview",
+                                magos_id=source.id))
 
     def state(value, source_revision, dest_revision):
         record.state = value
@@ -89,11 +101,17 @@ def apply_cross_route(client_id, object_id):
         from app import _vpn_v2_send
         outcome = run_direct_route_transaction(
             source, dest, src_plan, dest_plan, _vpn_v2_send, opid, state)
+        CrossRouteLease.query.filter_by(operation_id=opid).delete()
+        db.session.commit()
         flash(
             "Маршруты на двух Magos подтверждены. Далее проверьте обратный "
             "маршрут на сервере и AllowedIPs Cognitor перед применением ACL.",
             "success")
     except CrossRouteCoordinationError:
+        if record.state == "reverted":
+            CrossRouteLease.query.filter_by(operation_id=opid).delete()
+            db.session.commit()
+        # All unknown results deliberately retain the unique node leases.
         LOG.error("Cross-Magos routing transaction %s needs operator attention. "
                   "Controller state: %s", opid, record.state, exc_info=True)
         flash("Маршрутная транзакция не завершена. Проверьте состояние "
