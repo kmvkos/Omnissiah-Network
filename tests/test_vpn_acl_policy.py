@@ -250,7 +250,7 @@ def test_cross_magos_route_not_inferred_from_wg_interface(tmp_path):
     fake = FakeCommands()
     plan = manifest()
     plan["clients"][0]["targets"][0]["via_magos"] = True
-    with pytest.raises(mod.PolicyRejected, match="Cross-Magos"):
+    with pytest.raises(mod.PolicyRejected, match="authenticated Magos"):
         engine(tmp_path, fake).preview(plan)
 
 
