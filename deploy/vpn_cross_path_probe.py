@@ -194,31 +194,65 @@ class LinuxCrossPathProbe:
         # locally generated packet; the kernel may still drop another way.
         dest = (ip_network(required).network_address
                 + (1 if ip_network(required).prefixlen < 32 else 0))
-        try:
-            argv = ["ip", "-j", "-4", "route", "get", str(dest)]
-            if plan["role"] == "source":
-                argv += ["from", str(ip_network(plan["client_cidr"]).network_address),
-                         "iif", "wg0"]
-            routes = json.loads(self._read(argv))
-            if len(routes) != 1 or not isinstance(routes[0], dict):
-                raise ValueError
-            dev = routes[0].get("dev")
-        except (ValueError, TypeError, IndexError) as exc:
-            raise CrossPathCheckError("Cannot determine effective forwarded route") from exc
-        if dev != "wg0":
-            problems.append("Return/forwarding route to " + required + " is not on wg0")
+        argv = ["ip", "-j", "-4", "route", "get", str(dest)]
+        if plan["role"] == "source":
+            argv += ["from", str(ip_network(plan["client_cidr"]).network_address),
+                     "iif", "wg0"]
+        # A missing route before the route-extension transaction is normal.
+        # Represent it as a blocking diagnostic, NOT a root RPC exception/503.
+        # Never treat missing/invalid kernel output as evidence of a safe path.
+        def check_route(argv, expected, label):
+            try:
+                response = self.runner(
+                    argv, capture_output=True, text=True, timeout=10, check=False)
+                if response.returncode:
+                    raise CrossPathCheckError("Route lookup failed")
+                rows = json.loads(response.stdout)
+                if not isinstance(rows, list) or len(rows) != 1:
+                    raise CrossPathCheckError("Route lookup returned no unique path")
+                row = rows[0]
+                if not isinstance(row, dict) or not isinstance(row.get("dev"), str):
+                    raise CrossPathCheckError("Route lookup has no outgoing device")
+                if row.get("type") in ("unreachable", "blackhole", "prohibit"):
+                    raise CrossPathCheckError("Kernel rejects packets to destination")
+                if row["dev"] in expected:
+                    return True
+            except (ValueError, TypeError, OSError, subprocess.SubprocessError):
+                pass
+            problems.append(label)
+            return False
+
+        check_route(
+            argv, ("wg0",),
+            "Required route to " + required + " via wg0 is missing or unverifiable")
         if plan["role"] == "destination":
             resource = ip_network(plan["resource_cidr"])
             address = resource.network_address + (1 if resource.prefixlen < 32 else 0)
-            remote = json.loads(self._read(
-                ["ip", "-j", "-4", "route", "get", str(address)]))
-            if len(remote) != 1 or remote[0].get("dev") in (None, "wg0", "lo"):
-                problems.append("Destination Magos lacks local route to protected resource")
-        # Explicit management routes must not be captured by WireGuard.
+            # Destination resource must leave on the local LAN, not the VPN.
+            try:
+                response = self.runner(
+                    ["ip", "-j", "-4", "route", "get", str(address)],
+                    capture_output=True, text=True, timeout=10, check=False)
+                lan = json.loads(response.stdout) if response.returncode == 0 else None
+                if (not isinstance(lan, list) or len(lan) != 1
+                        or not isinstance(lan[0], dict)
+                        or lan[0].get("dev") in (None, "wg0", "lo")):
+                    problems.append("Destination Magos lacks local route to protected resource")
+            except (ValueError, TypeError, OSError, subprocess.SubprocessError):
+                problems.append("Destination Magos LAN route cannot be verified")
+        # Management must continue to use underlay; inability to verify blocks.
         for addr in self.protected:
-            row = json.loads(self._read(["ip", "-j", "-4", "route", "get", addr]))
-            if len(row) != 1 or row[0].get("dev") in ("wg0", None):
-                problems.append("Management/underlay routing unsafe")
+            try:
+                response = self.runner(
+                    ["ip", "-j", "-4", "route", "get", addr],
+                    capture_output=True, text=True, timeout=10, check=False)
+                management = json.loads(response.stdout) if response.returncode == 0 else None
+                if (not isinstance(management, list) or len(management) != 1
+                        or not isinstance(management[0], dict)
+                        or management[0].get("dev") in ("wg0", None)):
+                    problems.append("Management/underlay routing unsafe for " + addr)
+            except (ValueError, TypeError, OSError, subprocess.SubprocessError):
+                problems.append("Management/underlay route cannot be verified for " + addr)
         return {
             "node_name": self.node_name, "role": plan["role"],
             "peer_name": plan["peer_name"], "required_allowed_ip": required,
