@@ -18,6 +18,7 @@ from vpn_cross_magos_plan import plan_cross_magos, CrossPathRejected
 from vpn_cognitor_models import CognitorDraft
 from vpn_protected_models import ProtectedNetworkDraft
 from vpn_access_policy_models import AccessPolicyDraft
+from vpn_cross_route_models import CrossRouteOperation, CrossRouteLease
 
 policy_apply_bp = Blueprint("policy_apply", __name__)
 LOG = logging.getLogger(__name__)
@@ -66,11 +67,17 @@ def build_magos_policy_plan(magos_id):
         targets = []
         for resource_id, rules in grouped.items():
             obj = resources[resource_id]
-            targets.append({
+            target = {
                 "network": obj.network,
                 "via_magos": obj.parent_magos_id != node.id,
                 "rules": rules,
-            })
+            }
+            if target["via_magos"]:
+                other = db.session.get(General, obj.parent_magos_id)
+                if not other or other.role != "Magos" or not other.public_key:
+                    raise PolicyPlanError("Целевой Magos не зарегистрирован или не имеет публичного ключа")
+                target["route_peer_public_key"] = other.public_key
+            targets.append(target)
         plan_clients.append({
             "name": client.name, "address": client.vpn_address,
             "public_key": client.public_key, "targets": targets,
@@ -124,6 +131,38 @@ def inspect_cross_magos_paths(node, policy_plan, sender):
     return report
 
 
+def cross_routes_ready(node, plan, sender):
+    """Require a committed routing operation and fresh gateway observations."""
+    remote = [
+        (c, t) for c in plan["clients"]
+        for t in c["targets"] if t["via_magos"]
+    ]
+    if not remote:
+        return True, [], ""
+    checks = inspect_cross_magos_paths(node, plan, sender)
+    for client, target in remote:
+        entry = next((c for c in CognitorDraft.query.all()
+                      if c.name == client["name"]), None)
+        obj = next((o for o in ProtectedNetworkDraft.query.all()
+                    if o.network == target["network"]), None)
+        if not entry or not obj:
+            return False, checks, "Клиент или защищаемый объект не зарегистрированы"
+        if CrossRouteLease.query.filter(
+                CrossRouteLease.node_id.in_([node.id, obj.parent_magos_id])).first():
+            return False, checks, "На Magos осталась незавершённая маршрутная транзакция"
+        applied = CrossRouteOperation.query.filter_by(
+            cognitor_id=entry.id, object_id=obj.id,
+            source_magos_id=node.id, destination_magos_id=obj.parent_magos_id,
+            state="committed").first()
+        if applied is None:
+            return False, checks, "Сначала примените прямой и обратный маршруты на обоих Magos"
+        observed = next((x for x in checks
+                         if x["label"] == entry.name + " → " + obj.network), None)
+        if not observed or not observed["gateway_checks_passed"]:
+            return False, checks, "Маршрутизация между Magos не прошла повторную проверку"
+    return True, checks, ""
+
+
 @policy_apply_bp.route("/access-policy/apply/<int:magos_id>/preview", methods=["GET"])
 @login_required
 def access_policy_apply_preview(magos_id):
@@ -141,12 +180,9 @@ def access_policy_apply_preview(magos_id):
             actual = None
         node, plan = build_magos_policy_plan(magos_id)
         count = sum(len(t["rules"]) for c in plan["clients"] for t in c["targets"])
-        if any(t["via_magos"] for c in plan["clients"] for t in c["targets"]):
-            cross_paths = inspect_cross_magos_paths(node, plan, _vpn_v2_send)
-            raise PolicyPlanError(
-                "Ресурс расположен за другим Magos. Не подтверждены маршруты "
-                "и WG AllowedIPs туда/обратно; применение заблокировано, "
-                "чтобы не нарушить работающий Mesh.")
+        ready, cross_paths, reason = cross_routes_ready(node, plan, _vpn_v2_send)
+        if not ready:
+            raise PolicyPlanError(reason)
         from app import _vpn_v2_send
         result = _vpn_v2_send(node, "policy-preview", plan)
         if (not isinstance(result, dict)
@@ -186,6 +222,15 @@ def access_policy_apply(magos_id):
     if request.form.get("confirm_name") != node.name:
         flash("Имя Magos не совпадает; применение отменено", "danger")
         return redirect(url_for("policy_apply.access_policy_apply_preview", magos_id=magos_id))
+    from app import _vpn_v2_send
+    try:
+        ready, checks, reason = cross_routes_ready(node, plan, _vpn_v2_send)
+    except Exception:
+        ready, reason = False, "Не удалось проверить маршруты на обоих Magos"
+    if not ready:
+        flash(reason, "danger")
+        return redirect(url_for("policy_apply.access_policy_apply_preview",
+                                magos_id=magos_id))
     operation_id = str(uuid4())
     try:
         # Never implicitly retry an unknown result. Root checks revision,
