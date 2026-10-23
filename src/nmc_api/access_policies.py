@@ -32,6 +32,7 @@ class AccessPolicyForm(FlaskForm):
     submit = SubmitField("Сохранить черновик правила")
 
 
+@access_policies_bp.route("/access-policy", methods=["GET", "POST"])
 @access_policies_bp.route("/vpn/access-policies", methods=["GET", "POST"])
 @login_required
 def vpn_access_policies():
