@@ -259,7 +259,7 @@ def test_pending_cognitor_visible_and_policy_is_draft_only(web):
         registered.status = "draft"
         db.session.commit()
     listing = client.get("/vpn/access-policies").get_data(as_text=True)
-    assert "черновик, пока не применён" in listing
+    assert "черновик, применение не подтверждено в БД" in listing
     assert submit(client, ids).status_code == 302
     with app.app_context():
         saved = AccessPolicyDraft.query.one()
