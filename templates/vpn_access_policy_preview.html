@@ -19,7 +19,7 @@
       <dt class="col-sm-4">Регистрация клиента</dt><dd class="col-sm-8">{{ 'Применён (в БД, факт туннеля отдельно)' if result.source_prepared else 'Черновик — не подтверждено применение на Magos' }}</dd>
       <dt class="col-sm-4">Назначение</dt><dd class="col-sm-8">{{ result.destination }} ({{ result.destination_network }})</dd>
       <dt class="col-sm-4">Протокол / порт</dt><dd class="col-sm-8">{{ result.protocol }}{{ ':' ~ result.port if result.port is not none else '' }}</dd>
-      <dt class="col-sm-4">Решение</dt><dd class="col-sm-8">{{ 'Разрешить' if result.decision == 'allow' else 'Запретить' }}</dd>
+      <dt class="col-sm-4">Решение</dt><dd class="col-sm-8">{{ 'Разрешить' if result.decision == 'allow' else 'Запретить (DROP)' if result.decision == 'deny' else 'Отклонить (REJECT)' }}</dd>
       <dt class="col-sm-4">Разные Magos</dt><dd class="col-sm-8">{{ 'Да — нужна маршрутизация туда и обратно' if result.cross_magos else 'Нет' }}</dd>
       <dt class="col-sm-4">Маршрут проверен</dt><dd class="col-sm-8">Нет</dd>
       <dt class="col-sm-4">Firewall применён</dt><dd class="col-sm-8">Нет</dd>
