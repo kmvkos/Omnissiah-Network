@@ -6,7 +6,7 @@ from pki import write_if_changed
 
 MANAGED = {'name', 'role', 'management_ip', 'controller_name', 'server_url',
            'mtls_enabled', 'mtls_required', 'mtls_cert_file', 'mtls_key_file', 'mtls_ca_cert_file',
-           'vpn_route_transactions_enabled'}
+           'vpn_route_transactions_enabled', 'vpn_policy_apply_enabled'}
 
 
 def configure(path, desired):
