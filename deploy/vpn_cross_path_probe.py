@@ -98,6 +98,11 @@ def parse_persisted_peers(contents):
     for raw in contents.splitlines():
         row = raw.split("#", 1)[0].strip()
         if row == "[Peer]":
+            if current is not None and current["public_key"]:
+                key = current["public_key"]
+                if key in peers:
+                    raise CrossPathCheckError("Duplicate persisted peer")
+                peers[key] = current["allowed_ips"]
             current = {"public_key": None, "allowed_ips": []}
         elif row.startswith("["):
             if current is not None and current["public_key"]:
@@ -187,12 +192,12 @@ class LinuxCrossPathProbe:
         # locally generated packet; the kernel may still drop another way.
         dest = (ip_network(required).network_address
                 + (1 if ip_network(required).prefixlen < 32 else 0))
-        incoming = plan["client_cidr"] if plan["role"] == "source" else plan["resource_cidr"]
-        src = str(ip_network(incoming).network_address)
         try:
-            routes = json.loads(self._read(
-                ["ip", "-j", "-4", "route", "get", str(dest),
-                 "from", src, "iif", "wg0" if plan["role"] == "source" else "lo"]))
+            argv = ["ip", "-j", "-4", "route", "get", str(dest)]
+            if plan["role"] == "source":
+                argv += ["from", str(ip_network(plan["client_cidr"]).network_address),
+                         "iif", "wg0"]
+            routes = json.loads(self._read(argv))
             if len(routes) != 1 or not isinstance(routes[0], dict):
                 raise ValueError
             dev = routes[0].get("dev")
@@ -200,6 +205,13 @@ class LinuxCrossPathProbe:
             raise CrossPathCheckError("Cannot determine effective forwarded route") from exc
         if dev != "wg0":
             problems.append("Return/forwarding route to " + required + " is not on wg0")
+        if plan["role"] == "destination":
+            resource = ip_network(plan["resource_cidr"])
+            address = resource.network_address + (1 if resource.prefixlen < 32 else 0)
+            remote = json.loads(self._read(
+                ["ip", "-j", "-4", "route", "get", str(address)]))
+            if len(remote) != 1 or remote[0].get("dev") in (None, "wg0", "lo"):
+                problems.append("Destination Magos lacks local route to protected resource")
         # Explicit management routes must not be captured by WireGuard.
         for addr in self.protected:
             row = json.loads(self._read(["ip", "-j", "-4", "route", "get", addr]))
