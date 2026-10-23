@@ -135,7 +135,7 @@
               {% endif %}
             </td>
             <td>{{ rule.protocol | upper }}{{ ':' ~ rule.destination_port if rule.protocol != 'icmp' else '' }}</td>
-            <td>{{ 'Разрешить' if rule.decision == 'allow' else 'Запретить' }}</td>
+            <td>{{ 'Разрешить' if rule.decision == 'allow' else 'Запретить (DROP)' if rule.decision == 'deny' else 'Отклонить (REJECT)' }}</td>
             <td><span class="badge bg-secondary">{{ 'Применено в последней подтверждённой операции' if rule.status == 'applied' else 'Черновик — не применено' }}</span></td>
             <td>
               <a class="btn btn-sm btn-outline-modern" href="{{ url_for('access_policies.vpn_access_policy_preview', rule_id=rule.id) }}">Предпросмотр</a>
@@ -166,7 +166,8 @@
                            placeholder="Порт (пусто для ICMP)">
                     <select name="decision" class="form-select">
                       <option value="allow" {% if rule.decision == 'allow' %}selected{% endif %}>Разрешить</option>
-                      <option value="deny" {% if rule.decision == 'deny' %}selected{% endif %}>Запретить</option>
+                      <option value="deny" {% if rule.decision == 'deny' %}selected{% endif %}>Запретить (DROP)</option>
+                      <option value="reject" {% if rule.decision == 'reject' %}selected{% endif %}>Отклонить (REJECT)</option>
                     </select>
                     <button class="btn btn-sm btn-outline-modern" type="submit">Сохранить изменения</button>
                   </form>
